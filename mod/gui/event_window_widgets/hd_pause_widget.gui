@@ -1,0 +1,16 @@
+﻿# Attached to hd_event.0002, the proposal notification. Pauses the game the
+# moment the notification appears, which is the paper's auto-pause: the player
+# is never asked to judge a proposal while the world keeps moving.
+hbox = {
+	name = "hd_pause_widget"
+	layoutpolicy_horizontal = expanding
+	margin = { 10 0 }
+
+	state = {
+		name = pause
+		trigger_when = "[Not(IsGamePaused)]"
+		on_start = "[OnPause]"
+	}
+
+	expand = {}
+}

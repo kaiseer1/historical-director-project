@@ -1,0 +1,5 @@
+﻿# Opinion modifier used by the Director's set_relations action. The value is
+# supplied per-call by the toolkit effect, so the base is neutral here.
+hd_historical_opinion = {
+	opinion = 0
+}

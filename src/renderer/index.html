@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>The Historical Director</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>The Historical Director</h1>
+    <div id="status" class="status">
+      <span class="dot" id="dot"></span>
+      <span id="status-text">waiting for the game</span>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="proposals">Proposals <span class="badge" id="proposal-count">0</span></button>
+    <button class="tab" data-tab="world">World</button>
+    <button class="tab" data-tab="ledger">Lore Book</button>
+    <button class="tab" data-tab="log">Log</button>
+    <button class="tab" data-tab="settings">Settings</button>
+  </nav>
+
+  <main>
+    <section id="tab-proposals" class="panel active">
+      <div id="assessment" class="assessment" hidden></div>
+      <div id="proposals"></div>
+      <div id="empty" class="empty">
+        <p>Nothing awaiting your judgement.</p>
+        <p class="muted">The Director audits on its own every few years of game time, and this tab opens by itself when it finds something. You do not need to watch it.</p>
+        <div id="last-audit" class="last-audit"></div>
+        <button id="audit-now" class="secondary">Audit now</button>
+      </div>
+    </section>
+
+    <section id="tab-world" class="panel">
+      <div id="world"></div>
+    </section>
+
+    <section id="tab-ledger" class="panel">
+      <p class="muted ledger-intro">Every judgement you have made, carried forward into the Director's memory. Declines are kept as carefully as approvals, so a correction you refused is not proposed at you again.</p>
+      <div id="ledger"></div>
+    </section>
+
+    <section id="tab-log" class="panel">
+      <pre id="log"></pre>
+    </section>
+
+    <section id="tab-settings" class="panel">
+      <p class="muted settings-intro">Changes apply to the next audit; no restart, and nothing here
+        touches a running game. Everything except the API key is saved to <code>config.json</code>.</p>
+
+      <h2 class="settings-heading">How closely it watches</h2>
+      <div id="director-fields"></div>
+      <div class="verdict settings-actions">
+        <button id="director-save">Save</button>
+      </div>
+      <div id="director-result"></div>
+
+      <h2 class="settings-heading">What it reasons with</h2>
+
+      <div class="field-row">
+        <label for="preset">Provider</label>
+        <select id="preset">
+          <option value="">Choose a preset…</option>
+          <option value="https://api.deepseek.com">DeepSeek</option>
+          <option value="http://localhost:11434/v1">Ollama (local)</option>
+          <option value="custom">Custom (OpenAI-compatible)</option>
+        </select>
+      </div>
+
+      <div class="field-row">
+        <label for="baseUrl">Endpoint</label>
+        <input type="text" id="baseUrl" spellcheck="false" placeholder="https://api.deepseek.com" />
+      </div>
+
+      <div class="field-row">
+        <label for="model">Model</label>
+        <input type="text" id="model" spellcheck="false" placeholder="deepseek-chat" />
+      </div>
+
+      <div class="field-row">
+        <label for="temperature">Temperature</label>
+        <input type="number" id="temperature" step="0.1" min="0" max="2" />
+      </div>
+
+      <div class="field-row">
+        <label for="maxTokens">Max tokens</label>
+        <input type="number" id="maxTokens" step="100" min="1" max="32000" />
+      </div>
+
+      <div class="field-row">
+        <label for="apiKey">API key</label>
+        <input type="password" id="apiKey" spellcheck="false" placeholder="leave blank to keep the current key" />
+      </div>
+
+      <p class="muted key-note" id="key-note"></p>
+
+      <div class="verdict settings-actions">
+        <button id="settings-save">Save</button>
+        <button id="settings-test" class="secondary">Test connection</button>
+      </div>
+
+      <div id="settings-result"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

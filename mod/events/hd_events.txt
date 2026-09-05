@@ -1,0 +1,232 @@
+﻿namespace = hd_event
+
+# Startup. Fired once per player at game start; its only job is to open the
+# bootstrap widget, which spawns the persistent execution pump. The player sees
+# one notification confirming the Director is watching. If the pump is ever lost
+# (it does not survive a save reload) the re-arm decision fires this again.
+hd_event.0001 = {
+	type = character_event
+	title = hd_event.0001.t
+	desc = hd_event.0001.desc
+	theme = learning
+
+	left_portrait = {
+		character = root
+		animation = thinking
+	}
+
+	immediate = {
+		hd_heartbeat = yes
+	}
+
+	option = {
+		name = hd_event.0001.a
+	}
+
+	widget = {
+		gui = "hd_bootstrap_widget"
+		container = "custom_widgets_container"
+	}
+}
+
+# Proposal notification. The orchestrator stages this event when the Director
+# has something to propose; the attached widget pauses the game, and the actual
+# encyclopedic argument and the Approve / Decline controls live in the external
+# sidebar, where there is room to show retrieved evidence.
+hd_event.0002 = {
+	type = character_event
+	title = hd_event.0002.t
+	desc = hd_event.0002.desc
+	theme = learning
+
+	left_portrait = {
+		character = root
+		animation = worry
+	}
+
+	option = {
+		name = hd_event.0002.a
+	}
+
+	widget = {
+		gui = "hd_pause_widget"
+		container = "custom_widgets_container"
+	}
+}
+
+# --- Narrative events ------------------------------------------------------
+#
+# The Director fires these through trigger_event. They exist because a CK3
+# event is an arbitrary effect container with player-facing options, which
+# suits a human-in-the-loop design better than a new toolkit verb: the Director
+# proposes that the situation arise, the player approves that, and then the
+# player still chooses what to do about it inside the event. Two consent points
+# rather than one.
+#
+# Every one of them grants opportunity rather than forcing an outcome. None
+# starts a war. The paper's own example is the taifa kings' plea after the fall
+# of Toledo, "with the option to intervene, absorb the taifas for their
+# protection, or let them fall" - the option being the point.
+#
+# Each logs HD:/;/event_fired the moment it fires. This is not decoration. An
+# event whose trigger fails does nothing at all, and the orchestrator's own
+# applied line comes from the batch that fired it, not from the event - so
+# without this a blocked event would be reported to the player as a change that
+# happened. Section 11's lesson, applied rather than relearned.
+#
+# NOT YET OBSERVED IN GAME. The syntax is copied from vanilla and from RICE
+# rather than invented, but nobody has watched one of these fire. Use
+# scripts/verify-toolkit.mjs against a throwaway save before trusting them.
+
+# The Zirid pattern: a ruler is invited to intervene across a strait, in a
+# quarrel that is not yet theirs.
+hd_event.0100 = {
+	type = character_event
+	title = hd_event.0100.t
+	desc = hd_event.0100.desc
+	theme = learning
+
+	left_portrait = {
+		character = root
+		animation = thinking
+	}
+
+	trigger = {
+		is_landed = yes
+		is_adult = yes
+		any_neighboring_and_across_water_top_liege_realm_owner = {
+			NOT = { this = root }
+			exists = primary_title
+		}
+	}
+
+	immediate = {
+		debug_log = "HD:/;/event_fired/;/hd_event.0100"
+		random_neighboring_and_across_water_top_liege_realm_owner = {
+			limit = {
+				NOT = { this = root }
+				exists = primary_title
+			}
+			save_scope_as = hd_across_water
+		}
+	}
+
+	option = {
+		name = hd_event.0100.a
+		add_pressed_claim = scope:hd_across_water.primary_title
+	}
+
+	option = {
+		name = hd_event.0100.b
+		add_prestige = minor_prestige_gain
+	}
+}
+
+# The Almoravid pattern: a stronger power is called across the water by those
+# who cannot hold what they have, and does not always leave again.
+hd_event.0101 = {
+	type = character_event
+	title = hd_event.0101.t
+	desc = hd_event.0101.desc
+	theme = learning
+
+	left_portrait = {
+		character = root
+		animation = worry
+	}
+
+	trigger = {
+		is_landed = yes
+		is_adult = yes
+		any_neighboring_and_across_water_top_liege_realm_owner = {
+			NOT = { this = root }
+			exists = primary_title
+			faith = root.faith
+		}
+	}
+
+	immediate = {
+		debug_log = "HD:/;/event_fired/;/hd_event.0101"
+		random_neighboring_and_across_water_top_liege_realm_owner = {
+			limit = {
+				NOT = { this = root }
+				exists = primary_title
+				faith = root.faith
+			}
+			save_scope_as = hd_supplicant
+		}
+	}
+
+	option = {
+		name = hd_event.0101.a
+		add_pressed_claim = scope:hd_supplicant.primary_title
+		scope:hd_supplicant = {
+			add_opinion = {
+				target = root
+				modifier = hd_historical_opinion
+				opinion = -20
+			}
+		}
+	}
+
+	option = {
+		name = hd_event.0101.b
+		scope:hd_supplicant = {
+			add_opinion = {
+				target = root
+				modifier = hd_historical_opinion
+				opinion = 20
+			}
+		}
+	}
+}
+
+# The taifa pattern: a weakened neighbour asks for protection, and protection
+# is rarely free.
+hd_event.0102 = {
+	type = character_event
+	title = hd_event.0102.t
+	desc = hd_event.0102.desc
+	theme = learning
+
+	left_portrait = {
+		character = root
+		animation = thinking
+	}
+
+	trigger = {
+		is_landed = yes
+		is_adult = yes
+		any_neighboring_top_liege_realm_owner = {
+			NOT = { this = root }
+			exists = primary_title
+		}
+	}
+
+	immediate = {
+		debug_log = "HD:/;/event_fired/;/hd_event.0102"
+		random_neighboring_top_liege_realm_owner = {
+			limit = {
+				NOT = { this = root }
+				exists = primary_title
+			}
+			save_scope_as = hd_petitioner
+		}
+	}
+
+	option = {
+		name = hd_event.0102.a
+		add_pressed_claim = scope:hd_petitioner.primary_title
+	}
+
+	option = {
+		name = hd_event.0102.b
+		scope:hd_petitioner = {
+			add_opinion = {
+				target = root
+				modifier = hd_historical_opinion
+				opinion = 30
+			}
+		}
+	}
+}

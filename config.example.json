@@ -1,0 +1,25 @@
+{
+  "ck3UserFolder": "C:/Users/YOU/Documents/Paradox Interactive/Crusader Kings III",
+  "port": 7842,
+  "llm": {
+    "baseUrl": "https://api.deepseek.com",
+    "model": "deepseek-chat",
+    "apiKeyEnv": "HD_API_KEY",
+    "apiKey": "",
+    "temperature": 0.2,
+    "maxTokens": 2000
+  },
+  "director": {
+    "auditEveryYears": 5,
+    "sphereReach": 2,
+    "sphereMax": 12,
+    "maxRealmsInPrompt": 60,
+    "maxProposalsPerAudit": 2,
+    "requireApproval": true
+  },
+  "knowledge": {
+    "enabled": true,
+    "wikipediaLang": "en",
+    "maxDocuments": 6
+  }
+}

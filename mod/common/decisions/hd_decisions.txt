@@ -1,0 +1,22 @@
+﻿# The execution pump is a GUI widget, and GUI widgets do not survive loading a
+# save. This decision re-arms it without needing to restart the game.
+hd_rearm_director_decision = {
+	decision_group_type = decisions
+
+	picture = {
+		reference = "gfx/interface/illustrations/decisions/decision_misc.dds"
+	}
+
+	desc = hd_rearm_director_decision_desc
+	selection_tooltip = hd_rearm_director_decision_tooltip
+
+	is_shown = { always = yes }
+	is_valid = { always = yes }
+
+	effect = {
+		trigger_event = hd_event.0001
+	}
+
+	ai_check_interval = 0
+	ai_will_do = { base = 0 }
+}

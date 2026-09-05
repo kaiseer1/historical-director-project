@@ -1,0 +1,60 @@
+﻿# Arming the Director.
+#
+# Note the indirection below. An on_action may only carry one `effect` block in
+# the whole load order, so writing `effect = { ... }` straight onto a vanilla
+# on_action does not append to it, it fights every other mod that wants the
+# same hook and one of you silently loses. On a heavily modded install that
+# means either the Director never arms, or - worse - it wins and quietly
+# deletes another mod's game-start setup.
+#
+# The engine documents the way round it in common/on_action/_on_actions.info:
+# a vanilla on_action's `on_actions = { }` list *does* merge across files, so a
+# mod hangs its own privately-named on_action off the list and puts its effects
+# there. Nobody collides, because nobody else is called hd_bootstrap_on_action.
+#
+# The pump itself is a GUI widget and does not survive loading a save, and the
+# obvious hook does not help either: on_game_start_after_lobby fires when the
+# player leaves the lobby, and loading a save from the main menu never passes
+# through it. So the pump reports its own liveness instead. Every batch the
+# orchestrator stages sets a flag; once a year the watchdog asks whether that
+# flag has been set since it last looked, and rebuilds the pump if it has not.
+
+on_game_start_after_lobby = {
+	on_actions = { hd_bootstrap_on_action }
+}
+
+yearly_global_pulse = {
+	on_actions = { hd_yearly_on_action }
+}
+
+# --- our own on_actions, safe to own outright ------------------------------
+
+hd_bootstrap_on_action = {
+	effect = {
+		every_player = {
+			trigger_event = hd_event.0001
+		}
+	}
+}
+
+# Yearly audit tick, and the pump watchdog. The turn of the year is the
+# Director's natural cadence anyway: cheap, historically legible, and the point
+# at which drift is worth measuring.
+hd_yearly_on_action = {
+	effect = {
+		every_player = {
+			hd_heartbeat = yes
+		}
+
+		if = {
+			limit = {
+				NOT = { has_global_variable = hd_pump_alive }
+			}
+			every_player = {
+				trigger_event = hd_event.0001
+			}
+		}
+
+		remove_global_variable = hd_pump_alive
+	}
+}

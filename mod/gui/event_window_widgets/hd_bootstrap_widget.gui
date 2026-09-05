@@ -1,0 +1,15 @@
+﻿# Attached to hd_event.0001. Creating this widget is what spawns the persistent
+# hd_runner pump; the event exists only to give the widget somewhere to live.
+hbox = {
+	name = "hd_bootstrap_widget"
+	layoutpolicy_horizontal = expanding
+	margin = { 10 0 }
+
+	state = {
+		name = widget_show
+		trigger_on_create = yes
+		on_finish = "[ExecuteConsoleCommand('gui.createwidget gui/custom_gui/hd_runner.gui hd_runner')]"
+	}
+
+	expand = {}
+}

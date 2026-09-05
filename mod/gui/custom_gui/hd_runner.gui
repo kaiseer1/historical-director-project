@@ -1,0 +1,45 @@
+# Historical Director - execution pump.
+#
+# A 1x1 window parked in a corner that recreates itself on a timer. Each time
+# it is created it runs the orchestrator's staged effect file. This is the only
+# way a mod can execute script an external program decided on: `run` is a
+# console command, and ExecuteConsoleCommand is a GUI function, so a widget has
+# to be the thing that calls it. Requires -debug_mode, as VOTC does.
+#
+# Recreation is deliberately unconditional. An earlier version gated it on
+# whether a VOTC conversation was open, to keep the two mods off the console at
+# once. That was wrong: a gated recreation state does not pause the pump, it
+# lets the widget expire without a successor, so the first VOTC conversation of
+# a session killed the pump permanently. Running the file concurrently is
+# harmless anyway, because every batch carries a token guard and re-running a
+# completed batch does nothing.
+
+window = {
+	name = "hd_runner"
+	size = { 1% 1% }
+	parentanchor = top|right
+	movable = no
+	layer = bottom_bottom
+
+	state = {
+		name = itsshowtime
+		trigger_on_create = yes
+	}
+
+	hbox = {
+		name = "hd_runner_counter"
+
+		state = {
+			name = _show
+			trigger_on_create = yes
+			on_finish = "[ExecuteConsoleCommand('run hd.txt')]"
+		}
+
+		state = {
+			name = _show2
+			trigger_on_create = yes
+			duration = 2
+			on_finish = "[ExecuteConsoleCommand('gui.createwidget gui/custom_gui/hd_runner.gui hd_runner_counter')]"
+		}
+	}
+}

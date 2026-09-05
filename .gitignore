@@ -1,0 +1,46 @@
+# --- Secrets / local config ---
+config.json
+lorebook.json
+baseline.json
+*.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.cert
+*secret*
+*credential*
+
+# --- Dependencies ---
+node_modules/
+
+# --- Python virtual environments (if any tooling ends up using them) ---
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+
+# --- Logs ---
+*.log
+npm-debug.log*
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Build output ---
+# dist/ holds a 68 MB executable and the generated CommonJS bundle it is
+# built from; both are reproducible with `npm run build:exe`.
+dist/
+
+# --- Large / accidental binaries ---
+*.exe
+*.dll
+*.7z
+*.zip
+*.rar
+{FB5D69A6-2680-4F4D-85C3-4FE58AE7B91E}.png
