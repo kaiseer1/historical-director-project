@@ -143,6 +143,15 @@ setInterval(() => {
     const m = text.match(/HD:\/;\/applied\/;\/(\d+)\/;\/(\w+)/);
     if (!m) return;
     const [, tok, action] = m;
+
+    // Report the effects the batch actually carries. The orchestrator clears
+    // the run file as soon as it sees the applied record, so this is the only
+    // race-free moment at which anything can observe what was staged - which
+    // matters for an action like grant_claim whose momentum effects are the
+    // whole point and are invisible in the applied record itself.
+    const carried = ['add_pressed_claim', 'add_gold', 'add_prestige', 'add_piety', 'add_character_modifier', 'start_war']
+      .filter((effect) => text.includes(effect));
+    if (carried.length) console.log(`[sim] batch carries: ${carried.join(', ')}`);
     if (process.argv.includes('--refuse')) {
       emit(`HD:/;/refused/;/${tok}/;/${action}/;/precondition_failed`);
       console.log(`[sim] refused ${action} (precondition false)`);

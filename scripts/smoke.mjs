@@ -12,6 +12,7 @@
  *   node scripts/smoke.mjs --byzantium
  *   node scripts/smoke.mjs --keep       # leave the scratch folder for reading
  *   node scripts/smoke.mjs --bundle     # run dist/*.cjs instead of src/main.js
+ *   node scripts/smoke.mjs --momentum   # amplified grant_claim, approved end to end
  *
  * `--bundle` is the one that matters before a release. The executable does not
  * run these sources: it runs a CommonJS file that scripts/bundle.mjs folded
@@ -83,7 +84,9 @@ function requireBuilt(rel, how) {
 if (useBundle) requireBuilt(BUNDLE, 'node scripts/bundle.mjs');
 if (useExe) requireBuilt(EXE, 'npm run build:exe');
 
-const stub = start('stub', ['scripts/stub-llm.mjs', ...(scenario === '--andalus' ? ['--andalus'] : [])]);
+const momentumMode = args.includes('--momentum');
+const stubArgs = momentumMode ? ['--momentum'] : scenario === '--andalus' ? ['--andalus'] : [];
+const stub = start('stub', ['scripts/stub-llm.mjs', ...stubArgs]);
 const sim = start('sim', ['scripts/simulate-game.mjs', scenario, '--log', LOG]);
 
 // The executable is its own interpreter, so it is spawned directly rather than
@@ -100,10 +103,36 @@ if (useExe) { app.name = 'app'; kids.push(app); }
 
 app.stdout.on('data', (d) => { appOutput += d; });
 app.stderr.on('data', (d) => { appOutput += d; });
-for (const kid of [stub, sim]) kid.stderr.on('data', (d) => { appOutput += `[${kid.name}] ${d}`; });
+for (const kid of [stub, sim]) {
+  kid.stderr.on('data', (d) => { appOutput += `[${kid.name}] ${d}`; });
+  kid.stdout.on('data', (d) => { appOutput += `[${kid.name}] ${d}`; });
+}
 
-const SECONDS = 22;
-console.log(`running ${scenario.slice(2)} for ${SECONDS}s in ${HOME}\n`);
+const SECONDS = momentumMode ? 32 : 22;
+console.log(`running ${scenario.slice(2)}${momentumMode ? ' +momentum' : ''} for ${SECONDS}s in ${HOME}\n`);
+
+// Approving is the half of the loop the smoke test never exercised: everything
+// up to "the Director has 1 proposal" proves perception and reasoning, and
+// nothing at all about whether a verdict reaches the game. With --momentum the
+// proposal carries pre-authored effects, so this is also the only end-to-end
+// check that those survive validation, approval and script composition.
+if (momentumMode) {
+  setTimeout(async () => {
+    try {
+      const state = await fetch(`http://127.0.0.1:${PORT}/api/state`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      }).then((r) => r.json());
+      const first = state.proposals?.[0];
+      if (!first) { appOutput += '[smoke] nothing to approve\n'; return; }
+      appOutput += `[smoke] approving: ${first.preview}\n`;
+      await fetch(`http://127.0.0.1:${PORT}/api/approve`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: first.id }),
+      });
+    } catch (err) {
+      appOutput += `[smoke] approval failed: ${err?.message ?? err}\n`;
+    }
+  }, 18_000);
+}
 
 setTimeout(() => {
   for (const kid of kids) kid.kill();
@@ -133,7 +162,18 @@ setTimeout(() => {
     checks.push(['it writes a starting config', /wrote a starting config\.json|CK3 folder/]);
   }
 
-  if (scenario === '--andalus') {
+  if (momentumMode) {
+    checks.push(['a momentum proposal survives validation', /the Director has [1-9]\d* proposal/]);
+    checks.push(['its preview discloses the magnitude', /Momentum: holy war/]);
+    checks.push(['and says it does not start a war', /does not start a war/]);
+    checks.push(['the verdict reaches the game', /approved: Grant/]);
+    checks.push(['the staged batch carries the claim', /batch carries:.*add_pressed_claim/]);
+    checks.push(['and the momentum effects with it', /batch carries:.*add_character_modifier/]);
+    checks.push(['nothing in it starts a war', (out) => !/batch carries:.*start_war/.test(out)]);
+    checks.push(['the game confirms it took effect', /the game confirmed grant_claim took effect/]);
+  }
+
+  if (scenario === '--andalus' && !momentumMode) {
     // The point of this scenario. Before bookmarkTiers.js the proposal was
     // dropped with "has stood at empire tier since the campaign began".
     checks.push(['the mid-campaign gate lets a proposal through', /the Director has [1-9]\d* proposal/]);
@@ -143,7 +183,9 @@ setTimeout(() => {
   let failed = 0;
   console.log('');
   for (const [name, re] of checks) {
-    const ok = re.test(appOutput);
+    // A check is a pattern to find, or a predicate for the ones that assert an
+    // absence - "no start_war anywhere" cannot be written as a regex to match.
+    const ok = typeof re === 'function' ? re(appOutput) : re.test(appOutput);
     if (!ok) failed++;
     console.log(`${ok ? ' ok ' : 'FAIL'}  ${name}`);
   }

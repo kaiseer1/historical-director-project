@@ -11,6 +11,7 @@ import http from 'node:http';
 
 const bad = process.argv.includes('--bad');
 const andalusMode = process.argv.includes('--andalus');
+const momentumMode = process.argv.includes('--momentum');
 
 const good = {
   assessment:
@@ -54,6 +55,29 @@ const andalus = {
   ],
 };
 
+// The amplified grant_claim. Pairs with `simulate-game.mjs --andalus`, whose
+// Zahir III is Sunni and whose Alfonso IX is Catholic - so the faith gate on
+// holy_war passes here, and would refuse the same proposal against the Sunni
+// ruler of the Maghreb.
+const momentum = {
+  assessment:
+    'The Andalusian empire holds Iberia south of the Duero while Leon persists in the north. The record has the Almohads pressing hard on the Christian kingdoms in exactly this decade, and the game shows no such pressure.',
+  proposals: [
+    {
+      action: 'grant_claim',
+      args: { actor: 3001, target: 3005, momentum: 'holy_war' },
+      headline: 'Leon unpressed while the record has it under siege',
+      divergence:
+        'The game shows the Banu Zahir holding southern Iberia without contesting Leon. In the decades around 1218 the Almohads were pressing the northern Christian kingdoms continuously, and Leon was among the most exposed.',
+      historical_context:
+        'The Almohad Caliphate fought a sustained series of campaigns against the Iberian Christian kingdoms from the 1190s. Alarcos in 1195 was an Almohad victory that left Castile badly weakened; Las Navas de Tolosa in 1212 reversed it. Either way the border was under constant pressure, which is what the observed state lacks.',
+      consequences:
+        'Zahir III gains a pressed claim on Leon, together with the piety and money to declare and prosecute a religious war, and a lasting appetite for one. No war is started: the AI decides whether and when to act.',
+      confidence: 'medium',
+    },
+  ],
+};
+
 const badResponse = {
   assessment: 'Testing validation.',
   proposals: [
@@ -71,7 +95,7 @@ http
     req.on('data', (c) => (body += c));
     req.on('end', () => {
       console.log(`[stub] ${req.method} ${req.url} (${body.length} bytes of prompt)`);
-      const payload = JSON.stringify(bad ? badResponse : andalusMode ? andalus : good);
+      const payload = JSON.stringify(bad ? badResponse : momentumMode ? momentum : andalusMode ? andalus : good);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(
         JSON.stringify({
@@ -80,4 +104,4 @@ http
       );
     });
   })
-  .listen(7999, '127.0.0.1', () => console.log(`[stub] pretending to be a model on :7999 (${bad ? 'malformed' : andalusMode ? 'andalus' : 'well-formed'} output)`));
+  .listen(7999, '127.0.0.1', () => console.log(`[stub] pretending to be a model on :7999 (${bad ? 'malformed' : momentumMode ? 'momentum' : andalusMode ? 'andalus' : 'well-formed'} output)`));

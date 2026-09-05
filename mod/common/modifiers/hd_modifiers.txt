@@ -1,0 +1,71 @@
+﻿# Historical Director - momentum modifiers
+#
+# Applied by the amplified grant_claim action (see src/director/momentum.js).
+# A pressed claim is a reason to go to war; these are the disposition to act on
+# it. The Director never starts a war itself - it makes one affordable and
+# attractive, and the ruler decides through ordinary game mechanics.
+#
+# Modelled on guiscard_modifier in 00_bookmark_modifiers.txt, which is the base
+# game's own way of making a historically aggressive ruler behave like one:
+#
+#   guiscard_modifier = {
+#       icon = flame_positive
+#       army_maintenance_mult = -0.25
+#       enemy_hostile_scheme_success_chance_add = -25
+#       ai_war_cooldown = -1
+#       ai_war_chance = 10
+#   }
+#
+# These are stronger than that on purpose - roughly five times its war appetite
+# - and every value below is still inside the range vanilla uses somewhere:
+# ai_war_chance reaches 100, advantage reaches 6, levy_size reaches 0.5. They
+# are applied for a fixed 30 years and expire on their own, so a mistaken
+# approval is survivable.
+#
+# Only four modifier keys are used, and each was checked against real
+# definitions in the base game rather than assumed:
+#
+#   ai_war_chance    willingness to declare war at all
+#   ai_war_cooldown  how long the AI waits between wars (-1 removes it)
+#   advantage        raw combat advantage in battle
+#   levy_size        how many troops the levy raises
+#
+# ai_boldness and ai_zeal were considered and dropped: neither appears in any
+# vanilla modifier definition, so their behaviour here would be a guess.
+#
+# To tune these, change the numbers here AND the constants at the top of
+# src/director/momentum.js, which is what tells the player what they are
+# approving. The two are not read from one another.
+
+# --- reconquista -----------------------------------------------------------
+# The recovery of lost ground. Weighted towards fielding and winning an army.
+hd_reconquista_momentum = {
+	icon = martial_positive
+	ai_war_chance = 50
+	ai_war_cooldown = -1
+	advantage = 5
+	levy_size = 0.25
+}
+
+# --- holy war --------------------------------------------------------------
+# A war across a religious border, which the toolkit refuses to attach to a
+# co-religionist. Weighted the same way; the difference in game terms is the
+# piety that pays for the war, which the action grants separately.
+hd_holy_war_momentum = {
+	icon = piety_positive
+	ai_war_chance = 50
+	ai_war_cooldown = -1
+	advantage = 5
+	levy_size = 0.25
+}
+
+# --- succession pressure ---------------------------------------------------
+# A disputed inheritance pressed by force. Slightly less eager than an outright
+# war of conquest, and no combat bonus: the case is political, and what it buys
+# is the readiness to escalate rather than an edge on the field.
+hd_succession_momentum = {
+	icon = flame_positive
+	ai_war_chance = 40
+	ai_war_cooldown = -1
+	levy_size = 0.25
+}

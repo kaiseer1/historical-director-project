@@ -214,9 +214,17 @@ one you keep.
 
 **Changed anything in `src/`** — restart the orchestrator. Nothing else.
 
-**Changed anything in `mod/`** — redeploy *and* restart CK3. Note that v0.3 changed no mod script at
-all, only the version string in the descriptor: everything new is composed orchestrator-side and runs
-through the existing pump.
+**Changed anything in `mod/`** - redeploy *and* restart CK3.
+
+Most releases do not need this. v0.3 changed no mod script at all: everything it added is composed
+orchestrator-side and runs through the existing pump, which is what keeping the mod down to
+parameter-free primitives buys.
+
+**v0.4 does need it.** The amplified `grant_claim` applies character modifiers, and a modifier has to
+be *defined* in the mod before script can apply one. `mod/common/modifiers/hd_modifiers.txt` is new,
+so redeploy and restart CK3 before using momentum. If you skip this the claim still lands and the gold
+still arrives; only `add_character_modifier` fails, and it fails the way a missing definition always
+does - a line in `error.log` and nothing in the game. No trigger can guard against it.
 
 
 ```bash

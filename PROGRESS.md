@@ -53,6 +53,12 @@ proxy at all for the engine, which is the distinction section 4 was written to r
 - **The mid-campaign gate.** Verified over eight cases in `check-tier-fixes.mjs`, including the exact
   1218 realm that produced the old refusal. What it has not done is put a proposal in front of a
   player in a real 1217 save.
+- **Momentum on `grant_claim`** (§3a). The script is guarded and the fragments are fixed, but three
+  things about it are untested against the engine: whether `add_character_modifier` finds the new
+  modifiers at all (a missing definition is a script-log error CK3 skips, and no trigger can guard
+  against it), whether the AI visibly acts on `ai_war_chance = 50` inside a reasonable span, and
+  whether thirty years at that strength is far too much. The last of those is a tuning question that
+  only a live campaign can answer.
 - **`spawn_character` and `set_relations`.** Only the two map-shaping actions have been seen to land.
   `scripts/verify-toolkit.mjs` stages either one directly; it needs someone with a throwaway save.
 - **The three narrative events** (`hd_event.0100`–`0102`). Each logs when it fires so a blocked one is
@@ -103,6 +109,64 @@ Two further effects of the original cause, and where they stand:
 - Wikidata still returns `0 realms with structured backing` on heavily-modded saves: "banu zahir" and
   "Empire of Italia" are alt-history names no encyclopedia carries. Those audits run on Wikipedia
   prose alone, and now on the bookmark table. **Unfixed, and probably unfixable from this direction.**
+
+## 3a. Amplified `grant_claim`, v0.4
+
+The first action to do more than one thing, and the first test of whether the
+toolkit's constraints survive being asked to.
+
+A pressed claim is a *reason* to go to war and nothing else. The Director could
+hand one to a ruler with no money, no levies and no appetite for a campaign and
+watch nothing happen for forty years — which, on a slow save, is indistinguishable
+from the action having failed. `grant_claim` now takes an optional `momentum`
+enum: `none` (the default, and byte-identical to the old behaviour),
+`reconquista`, `holy_war`, `succession_pressure`. Non-none momentum grants the
+claim *and* the means to press it.
+
+**What it does not do is grant a casus belli, because CK3 cannot.** There is no
+`add_casus_belli` effect in the base game; `casus_belli = X` appears only inside
+a `start_war` block. Casus belli are derived — each type carries its own
+`is_valid` and `allowed_for_character` triggers, and a ruler either satisfies
+them or does not. The only way to hand someone a CB is to make an existing one's
+triggers true, which is exactly what `add_pressed_claim` already does for
+`claim_cb`. The claim *is* the CB grant; momentum is the half that pays for it:
+gold, the resource the war itself costs (piety for a holy war, prestige
+otherwise), and a timed character modifier raising `ai_war_chance` and removing
+`ai_war_cooldown`.
+
+There is deliberately no `start_war` anywhere in `momentum.js`. Setting the stage
+is the design; deciding is still the ruler's.
+
+**Precedent.** The modifiers are modelled on `guiscard_modifier`, which the base
+game ships in `00_bookmark_modifiers.txt` to make Robert Guiscard behave like a
+conqueror. It is the same idea — a historically aggressive ruler given a nudge —
+so the approach is idiomatic rather than invented. Only four modifier keys are
+used, each checked against real vanilla definitions: `ai_war_chance`,
+`ai_war_cooldown`, `advantage`, `levy_size`. `ai_boldness` and `ai_zeal` were
+considered and dropped because neither appears in any vanilla modifier
+definition, so their behaviour would have been a guess.
+
+**Magnitudes are large, by decision rather than by drift.** 1000 gold and a
+thirty-year modifier at roughly five times guiscard's war appetite. Both sit
+inside vanilla's own range (`add_gold = 1000` is common, `ai_war_chance = 100`
+exists), but this is not a nudge, and the mitigation is disclosure: the preview
+states the gold, the currency, the duration and the sentence "it does not start a
+war, but it makes one considerably more likely" before anyone approves. Every
+number lives in one table in `momentum.js` and its matching definitions in
+`mod/common/modifiers/hd_modifiers.txt`.
+
+**What the constraints bought.** The model picks one enum key and nothing else;
+every fragment is a fixed constant reached by lookup, so an unrecognised key
+yields no script rather than a malformed line. `validate` refuses an unknown
+momentum *by name* rather than downgrading it to `none`, because substituting a
+weaker action for the one proposed is the same class of error as repairing a
+malformed proposal. And `holy_war` is refused between co-religionists, and
+refused again when the snapshot carries no faiths at all — unknown is not
+permission.
+
+**This one needs a redeploy.** v0.3 changed no mod script; this adds
+`mod/common/modifiers/hd_modifiers.txt`, so the mod must be redeployed and CK3
+restarted, and the descriptor is at 0.4.0.
 
 ## 4. How it got here
 

@@ -16,6 +16,7 @@
 
 import { resolveTagged } from '../bridge/ck3Script.js';
 import { expectationFor } from './bookmarkTiers.js';
+import { MOMENTUM, MOMENTUM_KEYS, isMomentum, momentumOf, momentumScript, momentumPreview } from './momentum.js';
 
 /** Characters CK3 script treats structurally. Never let these through. */
 const UNSAFE = /["'{}\[\]$\\=#\r\n\t]/g;
@@ -218,12 +219,18 @@ export const TOOLKIT = {
   grant_claim: {
     signature: 'grant_claim',
     description:
-      "Seed a historically-grounded expansion by giving one ruler a pressed claim on another ruler's primary title.",
+      "Seed a historically-grounded expansion by giving one ruler a pressed claim on another ruler's primary title. The optional momentum parameter also gives that ruler the means and the appetite to press it - money, the resource the war itself costs, and a timed disposition towards war. It never starts a war: the ruler still decides through normal game mechanics.",
     parameters: {
       type: 'object',
       properties: {
         actor: { type: 'integer', description: 'Character id who gains the claim' },
         target: { type: 'integer', description: 'Character id whose primary title is claimed' },
+        momentum: {
+          type: 'string',
+          enum: MOMENTUM_KEYS,
+          description:
+            'Optional, defaults to "none". The historical pattern this claim belongs to, which selects a fixed set of supporting effects. "reconquista" for the recovery of lost ground, "holy_war" for a war across a religious border (refused when both rulers share a faith), "succession_pressure" for a disputed inheritance. Use "none", or omit it, for a bare claim. Momentum is a large intervention: choose it only where the record supports not just the claim but the campaign that followed it.',
+        },
       },
       required: ['actor', 'target'],
       additionalProperties: false,
@@ -234,7 +241,21 @@ export const TOOLKIT = {
       if (actor === null || !state.realmsById.has(actor)) return `actor ${a.actor} is not a ruler in the snapshot`;
       if (target === null || !state.realmsById.has(target)) return `target ${a.target} is not a ruler in the snapshot`;
       if (actor === target) return 'a ruler cannot press a claim on their own title';
-      return null;
+
+      // Momentum is validated in two stages, and both matter. The first is that
+      // the key exists at all - an unrecognised one is refused by name rather
+      // than quietly treated as "none", because substituting a weaker action
+      // for the one that was proposed is the same class of error as repairing a
+      // malformed proposal.
+      const momentum = momentumOf(a.momentum);
+      if (!isMomentum(momentum)) {
+        return `momentum "${safeString(a.momentum, 40)}" is not one of ${MOMENTUM_KEYS.join(', ')}`;
+      }
+
+      // The second is whether this momentum can be justified against these two
+      // realms. A holy war between co-religionists is not a holy war, and the
+      // snapshot already carries the faiths needed to say so.
+      return MOMENTUM[momentum].requires(state.realmsById.get(actor), state.realmsById.get(target));
     },
     preview(a, state) {
       const actor = state.realmsById.get(safeInt(a.actor));
@@ -243,14 +264,21 @@ export const TOOLKIT = {
       // is a claim on the whole empire, and the old wording conveyed that no
       // differently from a claim on a duchy.
       const tier = target?.tierKey ? `the ${target.tierKey}-tier title ` : '';
-      return `Grant ${actor?.ruler ?? a.actor} a pressed claim on ${tier}${target?.primaryTitle ?? 'the target primary title'}, held by ${target?.ruler ?? a.target}.`;
+      const claim = `Grant ${actor?.ruler ?? a.actor} a pressed claim on ${tier}${target?.primaryTitle ?? 'the target primary title'}, held by ${target?.ruler ?? a.target}.`;
+      return claim + momentumPreview(momentumOf(a.momentum), actor?.ruler ?? String(a.actor));
     },
     toScript: (a, token, state) => [
       ...resolveTagged(tagOf(state, safeInt(a.actor)), 'hd_actor'),
       ...resolveTagged(tagOf(state, safeInt(a.target)), 'hd_target'),
       ...guarded(
         'exists = scope:hd_actor\n\t\texists = scope:hd_target\n\t\texists = scope:hd_target.primary_title',
-        ['scope:hd_actor = { add_pressed_claim = scope:hd_target.primary_title }'],
+        [
+          'scope:hd_actor = { add_pressed_claim = scope:hd_target.primary_title }',
+          // Inside the same guard as the claim, so the two land together or not
+          // at all. Momentum without the claim it was granted for would be the
+          // Director handing a ruler an army and no reason to use it.
+          ...momentumScript(momentumOf(a.momentum), 'scope:hd_actor'),
+        ],
         'grant_claim',
         token,
       )],

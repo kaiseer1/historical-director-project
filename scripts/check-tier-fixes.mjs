@@ -15,6 +15,7 @@ import { SnapshotAssembler, renderRealmTable } from '../src/model/WorldState.js'
 import { parseLine } from '../src/bridge/protocol.js';
 import { Baseline } from '../src/model/Baseline.js';
 import { validateProposal } from '../src/director/toolkit.js';
+import { momentumScript, MOMENTUM_KEYS } from '../src/director/momentum.js';
 
 let passed = 0;
 let failed = 0;
@@ -46,7 +47,7 @@ function snapshot({ token = '1', date = '1066.9.15', totalDays = 389_000, realms
   for (const r of realms) {
     feed(
       `HD:/;/realm/;/${r.id}/;/${r.ruler}/;/${r.title}/;/${r.rank}/;/${r.counties ?? 5}` +
-      `/;/Frankish/;/Catholic/;/Paris/;/Capet/;/House Capet/;/yes/;/Feudal`,
+      `/;/${r.culture ?? 'Frankish'}/;/${r.faith ?? 'Catholic'}/;/Paris/;/Capet/;/House Capet/;/yes/;/Feudal`,
     );
     if (r.tierKey) feed(`HD:/;/realm_tier/;/${r.id}/;/${r.tierKey}`);
   }
@@ -433,6 +434,136 @@ const FRANCE = { id: 1, ruler: 'Philippe', title: 'Kingdom of France', rank: 'Ki
     '21. a proposal against the realm you play says so in the preview',
     r.ok && /your own realm/.test(r.preview),
     r.ok ? r.preview : r.error,
+  );
+}
+
+// --- 22-29. momentum on grant_claim -----------------------------------------
+// A pressed claim is a reason to go to war. Momentum is the capacity to act on
+// it, and it is the largest thing the toolkit can do without destroying
+// anything, so most of these cases are about what it refuses.
+
+/** Two rulers, whose faiths a case can set. */
+function pair({ actorFaith = 'Sunni', targetFaith = 'Catholic' } = {}) {
+  return snapshot({
+    token: '30',
+    date: '1218.4.2',
+    totalDays: 444907,
+    realms: [
+      { id: 1, ruler: 'Zahir III', title: 'the banu zahir Empire', rank: 'Empire', tierKey: 'empire', faith: actorFaith },
+      { id: 2, ruler: 'Alfonso IX', title: 'Kingdom of Leon', rank: 'Kingdom', tierKey: 'kingdom', faith: targetFaith },
+    ],
+  });
+}
+
+const claim = (args, snap) => validateProposal({ action: 'grant_claim', args }, snap, null);
+
+{
+  // The backward-compatibility case. An omitted momentum and an explicit "none"
+  // must both produce exactly what the action produced before momentum existed.
+  const snap = pair();
+  const omitted = claim({ actor: 1, target: 2 }, snap);
+  const explicit = claim({ actor: 1, target: 2, momentum: 'none' }, snap);
+  const scriptOf = (r) => r.action.toScript({ actor: 1, target: 2 }, 99, snap).join('\n');
+  check(
+    '22. momentum defaults to none, and none changes nothing',
+    omitted.ok && explicit.ok
+      && omitted.preview === explicit.preview
+      && !/Momentum:/.test(omitted.preview)
+      && !/add_gold|add_character_modifier/.test(scriptOf(omitted)),
+    omitted.ok ? omitted.preview : omitted.error,
+  );
+}
+
+{
+  const snap = pair();
+  const results = MOMENTUM_KEYS.map((m) => [m, claim({ actor: 1, target: 2, momentum: m }, snap)]);
+  const bad = results.filter(([, r]) => !r.ok);
+  check(
+    '23. every declared momentum validates against differing faiths',
+    bad.length === 0,
+    bad.length ? bad.map(([m, r]) => m + ': ' + r.error).join('; ') : MOMENTUM_KEYS.join(', '),
+  );
+}
+
+{
+  const r = claim({ actor: 1, target: 2, momentum: 'total_war' }, pair());
+  check(
+    '24. an unknown momentum is refused by name, not silently downgraded',
+    !r.ok && /not one of/.test(r.error) && /total_war/.test(r.error),
+    r.ok ? 'ACCEPTED, so an unvalidated enum reaches toScript' : r.error,
+  );
+}
+
+{
+  const r = claim({ actor: 1, target: 2, momentum: 'holy_war' }, pair({ actorFaith: 'Sunni', targetFaith: 'Sunni' }));
+  check(
+    '25. a holy war between co-religionists is refused',
+    !r.ok && /faith difference/.test(r.error),
+    r.ok ? 'ACCEPTED, so the Director can call a Sunni-on-Sunni war a holy war' : r.error,
+  );
+}
+
+{
+  // Fail closed: a snapshot that lost its faith fields must not read as
+  // "the faiths differ".
+  const r = claim({ actor: 1, target: 2, momentum: 'holy_war' }, pair({ actorFaith: '', targetFaith: '' }));
+  check(
+    '26. holy war fails closed when the snapshot carries no faiths',
+    !r.ok && /does not carry them/.test(r.error),
+    r.ok ? 'ACCEPTED on missing data, which is not permission' : r.error,
+  );
+}
+
+{
+  const snap = pair();
+  const r = claim({ actor: 1, target: 2, momentum: 'holy_war' }, snap);
+  check(
+    '27. the preview names the momentum and its magnitude',
+    r.ok
+      && /pressed claim/.test(r.preview)
+      && /Momentum: holy war/.test(r.preview)
+      && /1000 gold/.test(r.preview)
+      && /1000 piety/.test(r.preview)
+      && /30-year/.test(r.preview)
+      && /does not start a war/.test(r.preview),
+    r.ok ? r.preview : r.error,
+  );
+}
+
+{
+  const snap = pair();
+  const r = claim({ actor: 1, target: 2, momentum: 'reconquista' }, snap);
+  const script = r.ok ? r.action.toScript({ actor: 1, target: 2, momentum: 'reconquista' }, 77, snap).join('\n') : '';
+  check(
+    '28. the script keeps its guard and adds the momentum block inside it',
+    r.ok
+      && /add_pressed_claim = scope:hd_target\.primary_title/.test(script)
+      && /add_gold = 1000/.test(script)
+      && /modifier = hd_reconquista_momentum/.test(script)
+      && /years = 30/.test(script)
+      // Prestige for a reconquest, piety only for a holy war.
+      && /add_prestige = 1000/.test(script) && !/add_piety/.test(script)
+      // Everything sits inside the one guarded block, so claim and momentum
+      // land together or not at all, and the refusal branch still exists.
+      && script.indexOf('add_character_modifier') < script.indexOf('HD:/;/applied')
+      && /HD:\/;\/refused\/;\/77\/;\/grant_claim/.test(script)
+      // And nothing starts a war. The Director sets the stage.
+      && !/start_war/.test(script),
+    r.ok ? 'guarded, and no start_war' : r.error,
+  );
+}
+
+{
+  // The last line of defence. validate rejects an unknown momentum, but if it
+  // ever failed to, the fragment builder must still emit nothing rather than
+  // interpolate whatever it was handed.
+  const hostile = 'none } add_gold = 99999 scope:hd_actor = {';
+  check(
+    '29. an unvalidated momentum key yields no script at all',
+    momentumScript(hostile, 'scope:hd_actor').length === 0
+      && momentumScript('none', 'scope:hd_actor').length === 0
+      && momentumScript(undefined, 'scope:hd_actor').length === 0,
+    'unknown, none and undefined all produce zero lines',
   );
 }
 

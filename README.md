@@ -26,6 +26,7 @@ This is v0.3 — a testing alpha. A complete vertical slice, not a finished mod.
 | Sphere of influence | Seeded from where the player rules — capital *and* realm footprint — then grown as far outward as you set it |
 | Knowledge layer | Wikipedia lead extracts, era-filtered + Wikidata reign intervals and dynasty spans |
 | Toolkit | `spawn_character`, `set_relations`, `grant_claim`, `adjust_title_tier`, `trigger_event` |
+| Momentum | `grant_claim` can also supply the means to press a claim — money, the resource the war costs, and a timed appetite for it. It never starts the war |
 | Governance | Encyclopedic sidebar, auto-pause, Approve / Decline, every verdict logged |
 | Settings | Audit cadence, sphere reach and ceiling, and the model — all changed from the sidebar, no restart |
 | Lore Book | Persistent ledger of approvals *and* declines, re-injected into later audits |
@@ -212,6 +213,7 @@ src/
   model/Baseline.js       the map as the campaign began
   director/               regions, sphere of influence, toolkit, the Director
   director/bookmarkTiers.js  what the record says, at 867 / 1066 / 1178
+  director/momentum.js    the pre-authored amplifications of grant_claim
   knowledge/              Wikipedia + Wikidata retrieval
   lore/LoreBook.js        the ledger
   setup/                  mod deployment and preflight, shared by the exe and the scripts
