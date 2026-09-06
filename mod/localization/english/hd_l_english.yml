@@ -1,5 +1,12 @@
 ﻿l_english:
 
+ # CK3 localization is strictly one entry per line. A quoted string that runs
+ # onto a second physical line is not a continuation - the reader treats the
+ # next line as a new entry, finds no colon, and reports
+ # "Missing colon (:) separator". Three of the entries below used to wrap, which
+ # is why error.log carried three of those and why hd_event.0100 through 0102
+ # had no readable description. Paragraph breaks are \n\n, never a real newline.
+
  hd_event.0001.t:0 "The Historical Director"
  hd_event.0001.desc:0 "A chronicler has taken up residence in your court. [ROOT.Char.GetFirstNameNoTooltip] will find that nothing now passes unremarked: births and deaths, borders redrawn, houses risen and fallen. The Director keeps the record, and will speak when the world begins to stray from it.\n\nYou remain the judge of what is done about it."
  hd_event.0001.a:0 "Let the record be kept."
@@ -11,24 +18,19 @@
  hd_rearm_director_decision:0 "Recall the Historical Director"
  hd_rearm_director_decision_desc:0 "The Director's attention does not survive the loading of a save. Recall them, and the watch resumes."
  hd_rearm_director_decision_tooltip:0 "Restart the Historical Director's watch over the world."
+ hd_rearm_director_decision_confirm:0 "Recall them."
 
  hd_event.0100.t:0 "A Message Across the Water"
- hd_event.0100.desc:0 "A ship puts in with a letter and no envoy willing to wait for an answer. Across the water, [scope:hd_across_water.GetTitledFirstNameNicknamedNoTooltipRegnal] is pressed on all sides, and there are those in that country who would rather be ruled from here than by the neighbours currently deciding the matter.
-
-It would not be the first time a quarrel across a strait became an inheritance."
+ hd_event.0100.desc:0 "A ship puts in with a letter and no envoy willing to wait for an answer. Across the water, [scope:hd_across_water.GetTitledFirstNameNicknamedNoTooltipRegnal] is pressed on all sides, and there are those in that country who would rather be ruled from here than by the neighbours currently deciding the matter.\n\nIt would not be the first time a quarrel across a strait became an inheritance."
  hd_event.0100.a:0 "Their quarrel is our opportunity."
  hd_event.0100.b:0 "Let them settle it themselves."
 
  hd_event.0101.t:0 "The Crossing"
- hd_event.0101.desc:0 "They have asked us to come. [scope:hd_supplicant.GetTitledFirstNameNicknamedNoTooltipRegnal] holds land that [scope:hd_supplicant.GetHerHim] can no longer defend, and shares our faith, and would rather be defended by us than taken by anyone else.
-
-The scholars are already uneasy. A host invited across water has seldom been easy to send home again, and those who issue such invitations rarely enjoy the result."
+ hd_event.0101.desc:0 "They have asked us to come. [scope:hd_supplicant.GetTitledFirstNameNicknamedNoTooltipRegnal] holds land that [scope:hd_supplicant.GetHerHim] can no longer defend, and shares our faith, and would rather be defended by us than taken by anyone else.\n\nThe scholars are already uneasy. A host invited across water has seldom been easy to send home again, and those who issue such invitations rarely enjoy the result."
  hd_event.0101.a:0 "We will cross. What follows, follows."
  hd_event.0101.b:0 "Send aid, not an army."
 
  hd_event.0102.t:0 "A Plea for Protection"
- hd_event.0102.desc:0 "[scope:hd_petitioner.GetTitledFirstNameNicknamedNoTooltipRegnal] has lost ground and come to us rather than to the victor. The request is for protection. The unspoken part is that protection, offered long enough, becomes something else.
-
-We may take them under our care, and understand what that means. Or we may simply help them, and let them remain themselves."
+ hd_event.0102.desc:0 "[scope:hd_petitioner.GetTitledFirstNameNicknamedNoTooltipRegnal] has lost ground and come to us rather than to the victor. The request is for protection. The unspoken part is that protection, offered long enough, becomes something else.\n\nWe may take them under our care, and understand what that means. Or we may simply help them, and let them remain themselves."
  hd_event.0102.a:0 "Take them under our protection."
  hd_event.0102.b:0 "Help them stand on their own."
