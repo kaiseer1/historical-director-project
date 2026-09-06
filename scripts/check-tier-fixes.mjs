@@ -14,6 +14,7 @@ import path from 'node:path';
 import { SnapshotAssembler, renderRealmTable } from '../src/model/WorldState.js';
 import { parseLine } from '../src/bridge/protocol.js';
 import { Baseline } from '../src/model/Baseline.js';
+import { AuditClock } from '../src/model/AuditClock.js';
 import { validateProposal } from '../src/director/toolkit.js';
 import { momentumScript, MOMENTUM_KEYS, setMomentumSupport } from '../src/director/momentum.js';
 import { compareVersions, deployedModVersion, momentumSupport } from '../src/setup/modVersion.js';
@@ -745,6 +746,50 @@ function rings() {
     r.ok && !/lies outside/.test(r.preview),
     r.ok ? 'permitted, and the preview makes no distance claim it cannot support' : r.error,
   );
+}
+
+// --- 39-40. the audit clock ------------------------------------------------
+// The cadence lived only in memory, so every start of the orchestrator reset it
+// to "never" and the next heartbeat audited. One testing session produced
+// twenty-nine audits across six in-game years against a five-year cadence,
+// eight of them inside 1245 - each a retrieval pass and a paid completion over
+// a hundred-and-twenty-realm prompt.
+
+{
+  const clockPath = path.join(os.tmpdir(), `hd-clock-${Date.now()}.json`);
+  try { fs.unlinkSync(clockPath); } catch { /* first run */ }
+
+  const first = new AuditClock(clockPath);
+  const fresh = first.lastAuditYear;
+  first.record(1245, 454427);
+
+  // A second instance is what a restarted orchestrator sees.
+  const afterRestart = new AuditClock(clockPath);
+  check(
+    '39. the audit clock survives a restart',
+    fresh === -Infinity && afterRestart.lastAuditYear === 1245,
+    `before: ${fresh}, after a restart: ${afterRestart.lastAuditYear}`,
+  );
+
+  // Same campaign, later date: the clock stands.
+  const kept = afterRestart.reconcile(456252);
+  check(
+    '39b. and stands while the campaign moves forward',
+    kept === false && afterRestart.lastAuditYear === 1245,
+    'still 1245, so the cadence is not restarted every heartbeat',
+  );
+
+  // An earlier date is a different campaign or an earlier save, and a cadence
+  // carried over from a future that no longer exists would suppress audits for
+  // decades.
+  const dropped = afterRestart.reconcile(390000);
+  check(
+    '40. but is discarded when the game goes backwards in time',
+    dropped === true && afterRestart.lastAuditYear === -Infinity && !fs.existsSync(clockPath),
+    'cleared, and the file removed with it',
+  );
+
+  try { fs.unlinkSync(clockPath); } catch { /* already gone */ }
 }
 
 try { fs.unlinkSync(tmp); } catch { /* already gone */ }

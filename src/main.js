@@ -4,6 +4,7 @@ import { RunFileManager } from './bridge/RunFileManager.js';
 import { SnapshotAssembler } from './model/WorldState.js';
 import { LoreBook } from './lore/LoreBook.js';
 import { Baseline } from './model/Baseline.js';
+import { AuditClock } from './model/AuditClock.js';
 import { LLMClient } from './llm/client.js';
 import { Director } from './director/Director.js';
 import { seedSphere } from './director/sphere.js';
@@ -67,6 +68,7 @@ if (process.argv.includes('--selftest')) {
 
 const loreBook = new LoreBook(cfg.loreBookPath);
 const baseline = new Baseline(cfg.baselinePath);
+const auditClock = new AuditClock(cfg.auditClockPath);
 const runFile = new RunFileManager(cfg.ck3UserFolder);
 const tailer = new LogTailer(cfg.debugLogPath);
 const assembler = new SnapshotAssembler();
@@ -89,7 +91,15 @@ const state = {
   /** @type {{token: number, proposal: any} | null} */
   awaitingApply: null,
   busy: false,
-  lastAuditYear: -Infinity,
+  // Restored from disk, so a restart does not reset the cadence to "never".
+  lastAuditYear: auditClock.lastAuditYear,
+  /**
+   * True while the current request is a restart's one free look at the world
+   * rather than an audit that is due. The snapshot still arrives and the
+   * sidebar still fills; runAudit is what gets skipped, because that is the
+   * part that costs money.
+   */
+  reorienting: false,
   /** Which request we are waiting on, so duplicate answers are ignored. */
   /** @type {'locate'|'snapshot'|null} */
   pending: null,
@@ -118,6 +128,9 @@ function log(msg) {
   console.log(line);
   broadcast('log', line);
 }
+
+/** Whether this run has already taken its one free re-orientation snapshot. */
+let reorientedThisRun = false;
 
 const director = new Director({
   llm,
@@ -207,10 +220,35 @@ tailer.on('record', async (rec) => {
       state.year = Number(String(out.date).match(/\d{3,4}/)?.[0]) || state.year;
       broadcast('state', publicState());
 
-      if (!state.busy && state.year - state.lastAuditYear >= cfg.director.auditEveryYears) {
-        state.lastAuditYear = state.year;
-        log(`${state.year}: audit due`);
-        requestLocate();
+      // A save loaded earlier than the clock was written against is a
+      // different campaign, and a cadence carried over from a future that no
+      // longer exists would suppress audits for decades.
+      if (auditClock.reconcile(state.totalDays)) {
+        state.lastAuditYear = -Infinity;
+        log('this campaign predates the recorded audit clock; starting the cadence again');
+      }
+
+      // `pending` matters as much as `busy`: a staged request that has not
+      // been answered yet is an audit already in flight, and the cadence is no
+      // longer advanced at request time, so nothing else would stop a second.
+      if (!state.busy && !state.pending) {
+        const due = state.year - state.lastAuditYear >= cfg.director.auditEveryYears;
+        const nextDue = state.lastAuditYear + cfg.director.auditEveryYears;
+
+        if (due) {
+          state.reorienting = false;
+          log(`${state.year}: audit due`);
+          requestLocate();
+        } else if (!reorientedThisRun) {
+          // One free look per run. The orchestrator has just started and knows
+          // nothing about the world; the snapshot costs nothing but a run-file
+          // round trip, and without it the sidebar is blank and the toolkit has
+          // no rulers to address until the next audit falls due.
+          reorientedThisRun = true;
+          state.reorienting = true;
+          log(`${state.year}: re-orienting after a restart. Last audit ${state.lastAuditYear}, next due ${nextDue}; taking a snapshot without auditing`);
+          requestLocate();
+        }
       }
       break;
     }
@@ -269,6 +307,12 @@ tailer.on('record', async (rec) => {
         log(`the game went backwards in time; baseline re-captured at ${out.snapshot.date}`);
       }
       broadcast('state', publicState());
+
+      if (state.reorienting) {
+        state.reorienting = false;
+        log(`world state refreshed; next audit at ${state.lastAuditYear + cfg.director.auditEveryYears}. Use Audit now to override.`);
+        break;
+      }
       await runAudit();
       break;
     }
@@ -318,6 +362,14 @@ tailer.on('record', async (rec) => {
 async function runAudit() {
   if (state.busy || !state.snapshot) return;
   state.busy = true;
+
+  // Recorded here rather than when the request was staged, so the cadence
+  // tracks audits that were actually attempted. Recorded before the API key
+  // check rather than after success, because a key that is missing or a
+  // provider that is down would otherwise retry on every heartbeat.
+  state.lastAuditYear = state.snapshot.year || state.year;
+  auditClock.record(state.lastAuditYear, state.snapshot.totalDays || state.totalDays);
+
   broadcast('state', publicState());
 
   try {
@@ -461,7 +513,14 @@ const { server, broadcast } = createServer({
   lorebook: () => ({ entries: loreBook.all() }),
   approve,
   decline,
-  audit: async () => { requestLocate(); return { ok: true }; },
+  audit: async () => {
+    // An explicit request always audits, whatever the clock says. It is the
+    // override for a cadence the player has decided is too slow, and for the
+    // re-orientation snapshot they would rather have been an audit.
+    state.reorienting = false;
+    requestLocate();
+    return { ok: true };
+  },
   settings: (body) => {
     const result = llmSettings.settings(body);
     if (result.updated?.length) {

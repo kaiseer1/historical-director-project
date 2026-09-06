@@ -46,6 +46,7 @@ export function loadConfig() {
     port: raw.port ?? 7842,
     loreBookPath: path.join(ROOT, 'lorebook.json'),
     baselinePath: path.join(ROOT, 'baseline.json'),
+    auditClockPath: path.join(ROOT, 'auditclock.json'),
     llm: {
       baseUrl: llm.baseUrl ?? 'https://api.deepseek.com',
       model: llm.model ?? 'deepseek-chat',

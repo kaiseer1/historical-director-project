@@ -13,6 +13,7 @@
  *   node scripts/smoke.mjs --keep       # leave the scratch folder for reading
  *   node scripts/smoke.mjs --bundle     # run dist/*.cjs instead of src/main.js
  *   node scripts/smoke.mjs --momentum   # amplified grant_claim, approved end to end
+ *   node scripts/smoke.mjs --restart    # prove a restart does not re-audit
  *
  * `--bundle` is the one that matters before a release. The executable does not
  * run these sources: it runs a CommonJS file that scripts/bundle.mjs folded
@@ -97,6 +98,7 @@ if (useBundle) requireBuilt(BUNDLE, 'node scripts/bundle.mjs');
 if (useExe) requireBuilt(EXE, 'npm run build:exe');
 
 const momentumMode = args.includes('--momentum');
+const restartMode = args.includes('--restart');
 const stubArgs = momentumMode ? ['--momentum'] : scenario === '--andalus' ? ['--andalus'] : [];
 const stub = start('stub', ['scripts/stub-llm.mjs', ...stubArgs]);
 const sim = start('sim', ['scripts/simulate-game.mjs', scenario, '--log', LOG]);
@@ -120,7 +122,21 @@ for (const kid of [stub, sim]) {
   kid.stdout.on('data', (d) => { appOutput += `[${kid.name}] ${d}`; });
 }
 
-const SECONDS = momentumMode ? 32 : 22;
+// The restart leg needs the first run to audit, then a second process against
+// the same HD_HOME to prove it does not.
+const SECONDS = restartMode ? 40 : momentumMode ? 32 : 22;
+
+if (restartMode) {
+  setTimeout(() => {
+    appOutput += '\n[smoke] ---- killing the orchestrator and starting it again ----\n';
+    app.kill();
+    setTimeout(() => {
+      const again = start('app2', ['src/main.js'], { HD_HOME: HOME, HD_API_KEY: 'smoke-test-key' });
+      again.stdout.on('data', (d) => { appOutput += String(d).replace(/^/gm, '[run2] '); });
+      again.stderr.on('data', (d) => { appOutput += String(d).replace(/^/gm, '[run2] '); });
+    }, 1500);
+  }, 20_000);
+}
 console.log(`running ${scenario.slice(2)}${momentumMode ? ' +momentum' : ''} for ${SECONDS}s in ${HOME}\n`);
 
 // Approving is the half of the loop the smoke test never exercised: everything
@@ -172,6 +188,20 @@ setTimeout(() => {
     checks.push(['it deploys the companion mod itself', /companion mod deployed: \d+ files/]);
     checks.push(['it runs its own preflight', /preflight:/]);
     checks.push(['it writes a starting config', /wrote a starting config\.json|CK3 folder/]);
+  }
+
+  if (restartMode) {
+    // The failure this closes: the cadence lived only in memory, so every start
+    // reset it to "never" and the next heartbeat audited. Twenty-nine audits in
+    // six in-game years against a five-year cadence, each one paid for.
+    checks.push(['the first run audits', /auditing \d+ across/]);
+    checks.push(['the clock survives the restart', /\[run2\][^\n]*re-orienting after a restart/]);
+    checks.push(['the second run still refreshes the world', /\[run2\][^\n]*snapshot received/]);
+    checks.push(['but does not audit again', (out) => {
+      const second = out.slice(out.indexOf('[smoke] ---- killing'));
+      return !/auditing \d+ across/.test(second);
+    }]);
+    checks.push(['and says when the next one is due', /\[run2\][^\n]*next audit at \d+/]);
   }
 
   if (momentumMode) {

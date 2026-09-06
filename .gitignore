@@ -2,6 +2,7 @@
 config.json
 lorebook.json
 baseline.json
+auditclock.json
 *.env
 .env.*
 !.env.example
