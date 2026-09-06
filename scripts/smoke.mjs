@@ -30,6 +30,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { deployMod } from '../src/setup/deployMod.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -42,6 +43,17 @@ const LOG = path.join(CK3, 'logs', 'debug.log');
 fs.mkdirSync(path.dirname(LOG), { recursive: true });
 fs.mkdirSync(path.join(CK3, 'run'), { recursive: true });
 fs.writeFileSync(LOG, '', 'utf8');
+
+// Deploy the companion mod into the scratch folder, exactly as a real setup
+// has it. Not decoration: the toolkit now refuses momentum unless the deployed
+// mod is new enough to define the modifiers it applies, so a scratch folder
+// with no mod in it is a scratch folder where momentum cannot be tested. It
+// also means every run of this test exercises deployMod for free.
+const deployed = deployMod(CK3);
+if (!deployed.ok) {
+  console.error(`could not deploy the companion mod into the scratch folder: ${deployed.error}`);
+  process.exit(1);
+}
 
 const PORT = 7871;
 const STUB = 7999;

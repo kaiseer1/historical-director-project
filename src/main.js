@@ -16,6 +16,11 @@ import { locateScript, snapshotScript, actionScript } from './bridge/ck3Script.j
 import { isPackaged, describeRuntime, listAssets } from './runtime.js';
 import { deployMod } from './setup/deployMod.js';
 import { preflight, problemCount } from './setup/preflight.js';
+// Two similarly named things, kept apart on purpose: modVersion's resolves the
+// answer by reading the deployed descriptor, momentum's reports the answer the
+// toolkit is currently acting on.
+import { momentumSupport as resolveMomentumSupport } from './setup/modVersion.js';
+import { setMomentumSupport, momentumSupport as momentumSupportState } from './director/momentum.js';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -372,6 +377,12 @@ function decline({ id }) {
   return { ok: true };
 }
 
+/** What the sidebar needs to warn about a stale mod. */
+function momentumState() {
+  const m = momentumSupportState();
+  return { ok: m.ok, version: m.version, reason: m.reason, checked: m.checked };
+}
+
 function publicState() {
   return {
     connected: state.connected,
@@ -398,6 +409,7 @@ function publicState() {
       hasKey: Boolean(llm.apiKey),
       auditEveryYears: cfg.director.auditEveryYears,
       sphereReach: cfg.director.sphereReach,
+      momentum: momentumState(),
       sphereMax: cfg.director.sphereMax,
       maxRealmsInPrompt: cfg.director.maxRealmsInPrompt,
       knowledge: cfg.knowledge.enabled,
@@ -464,6 +476,26 @@ setInterval(() => {
 // --------------------------------------------------------------------------
 
 /**
+ * Ask the deployed mod what it can execute, and tell the toolkit.
+ *
+ * Called at startup and again after any deploy. The orchestrator and the mod
+ * are versioned and deployed separately, and momentum is the one thing that
+ * needs them to agree: it applies a character modifier the mod has to define.
+ * Without this the sidebar would describe effects a stale mod cannot land, and
+ * the applied record would still say ok.
+ */
+function checkModCapabilities() {
+  const mod = resolveMomentumSupport(cfg.ck3UserFolder);
+  setMomentumSupport(mod);
+  if (mod.ok) {
+    log(`companion mod v${mod.version} deployed; momentum available`);
+  } else {
+    log(`momentum unavailable: ${mod.reason}`);
+  }
+  return mod;
+}
+
+/**
  * What the executable does that `npm start` does not.
  *
  * Someone running from a checkout has already cloned a repo and read a README,
@@ -505,6 +537,10 @@ function packagedSetup() {
   } else {
     log(`could not deploy the companion mod: ${result.error}`);
   }
+
+  // After deploying, not before: the deploy is what may have just made
+  // momentum available.
+  checkModCapabilities();
 
   const findings = preflight(cfg);
   const problems = findings.filter((f) => !f.ok);
@@ -568,6 +604,10 @@ server.listen(cfg.port, '127.0.0.1', () => {
   runFile.clear();
   tailer.start();
   log('watching for the game');
+
+  // Packaged runs check this inside packagedSetup, after deploying. A source
+  // run deploys nothing, so it has to ask here.
+  if (!isPackaged()) checkModCapabilities();
 
   if (isPackaged()) {
     packagedSetup();

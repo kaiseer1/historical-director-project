@@ -232,6 +232,20 @@ function renderWorld() {
       'No API key is set, so the Director cannot audit. Set HD_API_KEY in your environment and restart.'));
   }
 
+  // The orchestrator and the companion mod are deployed separately, and
+  // momentum is the one thing that needs them to agree. Said here rather than
+  // left to a dropped-proposal line, because the player should know a whole
+  // class of proposal is unavailable before wondering why it never appears.
+  const m = s.config?.momentum;
+  if (m && !m.ok) {
+    const warn = el('div', 'warn');
+    warn.appendChild(el('strong', null, 'Momentum is unavailable.'));
+    warn.appendChild(el('p', null, m.reason));
+    warn.appendChild(el('p', null,
+      'Claims can still be granted; only the effects that make a ruler able and willing to press one are withheld. The Director will not propose them, so nothing here promises an effect your game cannot execute.'));
+    host.appendChild(warn);
+  }
+
   const dl = document.createElement('dl');
   const rows = [
     ['In-game date', s.date ?? 'unknown'],
@@ -241,6 +255,9 @@ function renderWorld() {
     ['Sphere of influence', s.sphere?.labels?.join('; ') || 'not yet computed'],
     ['Sphere setting', `reach ${s.config?.sphereReach ?? '?'}, up to ${s.config?.sphereMax ?? '?'} regions`],
     ['Realms observed', String(s.realmCount ?? 0)],
+    ['Companion mod', s.config?.momentum?.version
+      ? `v${s.config.momentum.version}${s.config.momentum.ok ? '' : ' (too old for momentum)'}`
+      : s.config?.momentum?.checked ? 'not deployed' : 'unverified'],
     ['Model', s.config?.model ?? '-'],
     ['Audit cadence', `every ${s.config?.auditEveryYears ?? '?'} in-game years`],
     ['Knowledge layer', s.config?.knowledge ? 'Wikipedia + Wikidata' : 'disabled'],

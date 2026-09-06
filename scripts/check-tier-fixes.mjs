@@ -15,7 +15,8 @@ import { SnapshotAssembler, renderRealmTable } from '../src/model/WorldState.js'
 import { parseLine } from '../src/bridge/protocol.js';
 import { Baseline } from '../src/model/Baseline.js';
 import { validateProposal } from '../src/director/toolkit.js';
-import { momentumScript, MOMENTUM_KEYS } from '../src/director/momentum.js';
+import { momentumScript, MOMENTUM_KEYS, setMomentumSupport } from '../src/director/momentum.js';
+import { compareVersions, deployedModVersion, momentumSupport } from '../src/setup/modVersion.js';
 
 let passed = 0;
 let failed = 0;
@@ -565,6 +566,87 @@ const claim = (args, snap) => validateProposal({ action: 'grant_claim', args }, 
       && momentumScript(undefined, 'scope:hd_actor').length === 0,
     'unknown, none and undefined all produce zero lines',
   );
+}
+
+// --- 30-33. the preview may not promise what the mod cannot execute --------
+// The orchestrator and the companion mod are versioned and deployed
+// separately. Momentum is the only thing that needs them to agree, because it
+// applies a character modifier the mod has to define - and a missing definition
+// fails as a line in error.log and nothing in the game, while the applied
+// record still says ok. This was live: a 1250 campaign ran a v0.4 orchestrator
+// against a v0.3.0 mod.
+
+{
+  check(
+    '30. version comparison orders releases numerically',
+    compareVersions('0.4.0', '0.3.0') > 0
+      && compareVersions('0.3.0', '0.4.0') < 0
+      && compareVersions('0.4.1', '0.4.1') === 0
+      && compareVersions('0.10.0', '0.9.0') > 0
+      && compareVersions('1.0', '0.9.9') > 0,
+    '0.10.0 > 0.9.0, so this is not a string comparison',
+  );
+}
+
+{
+  // A folder with no mod in it is the "not deployed" case.
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'hd-nomod-'));
+  const support = momentumSupport(empty);
+  check(
+    '31. an undeployed mod reports momentum unavailable, and names the fix',
+    !support.ok && support.version === null && /deploy:mod/.test(support.reason),
+    support.reason,
+  );
+  check(
+    '31b. and no descriptor means no version',
+    deployedModVersion(empty) === null,
+    'null rather than a guess',
+  );
+  fs.rmSync(empty, { recursive: true, force: true });
+}
+
+{
+  // A deployed but stale mod: exactly the 1250 campaign's situation.
+  const stale = fs.mkdtempSync(path.join(os.tmpdir(), 'hd-stalemod-'));
+  const dir = path.join(stale, 'mod', 'historical_director');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'descriptor.mod'), 'version="0.3.0"\nname="Historical Director"\n', 'utf8');
+  const support = momentumSupport(stale);
+  check(
+    '32. a stale companion mod is detected and reported by version',
+    !support.ok && support.version === '0.3.0' && /v0\.3\.0/.test(support.reason) && /restart CK3/.test(support.reason),
+    support.reason,
+  );
+
+  // And the toolkit refuses momentum rather than previewing it.
+  setMomentumSupport(support);
+  const snap = pair();
+  const refused = claim({ actor: 1, target: 2, momentum: 'holy_war' }, snap);
+  const bare = claim({ actor: 1, target: 2 }, snap);
+  check(
+    '32b. the toolkit then refuses momentum but still allows a bare claim',
+    !refused.ok && /cannot be executed/.test(refused.error) && bare.ok && !/Momentum:/.test(bare.preview),
+    refused.ok ? 'ACCEPTED, so the sidebar would promise an effect the mod cannot land' : refused.error,
+  );
+
+  fs.rmSync(stale, { recursive: true, force: true });
+}
+
+{
+  // A current mod restores it. Left in this state for any later case.
+  const current = fs.mkdtempSync(path.join(os.tmpdir(), 'hd-curmod-'));
+  const dir = path.join(current, 'mod', 'historical_director');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'descriptor.mod'), 'version="0.4.1"\nname="Historical Director"\n', 'utf8');
+  const support = momentumSupport(current);
+  setMomentumSupport(support);
+  const r = claim({ actor: 1, target: 2, momentum: 'holy_war' }, pair());
+  check(
+    '33. a current mod re-enables momentum',
+    support.ok && support.version === '0.4.1' && r.ok && /Momentum: holy war/.test(r.preview),
+    support.ok ? 'v' + support.version + ', momentum available' : support.reason,
+  );
+  fs.rmSync(current, { recursive: true, force: true });
 }
 
 try { fs.unlinkSync(tmp); } catch { /* already gone */ }

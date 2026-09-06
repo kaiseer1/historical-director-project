@@ -16,7 +16,7 @@
 
 import { resolveTagged } from '../bridge/ck3Script.js';
 import { expectationFor } from './bookmarkTiers.js';
-import { MOMENTUM, MOMENTUM_KEYS, isMomentum, momentumOf, momentumScript, momentumPreview } from './momentum.js';
+import { MOMENTUM, MOMENTUM_KEYS, isMomentum, momentumOf, momentumScript, momentumPreview, momentumSupport } from './momentum.js';
 
 /** Characters CK3 script treats structurally. Never let these through. */
 const UNSAFE = /["'{}\[\]$\\=#\r\n\t]/g;
@@ -252,7 +252,17 @@ export const TOOLKIT = {
         return `momentum "${safeString(a.momentum, 40)}" is not one of ${MOMENTUM_KEYS.join(', ')}`;
       }
 
-      // The second is whether this momentum can be justified against these two
+      // The second is whether the deployed mod can execute it. Refusing here
+      // rather than in toScript is the point: the preview is what the player
+      // approves, and a preview that describes a modifier the mod has no
+      // definition for is the sidebar lying about what approval will do. The
+      // batch would still report "ok", because the batch would still run.
+      if (momentum !== 'none') {
+        const mod = momentumSupport();
+        if (!mod.ok) return `momentum "${momentum}" cannot be executed: ${mod.reason}`;
+      }
+
+      // The third is whether this momentum can be justified against these two
       // realms. A holy war between co-religionists is not a holy war, and the
       // snapshot already carries the faiths needed to say so.
       return MOMENTUM[momentum].requires(state.realmsById.get(actor), state.realmsById.get(target));

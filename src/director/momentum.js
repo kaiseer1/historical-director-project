@@ -133,6 +133,35 @@ export const MOMENTUM = {
 /** The enum offered to the model. */
 export const MOMENTUM_KEYS = Object.keys(MOMENTUM);
 
+/**
+ * Whether the deployed companion mod can actually execute momentum.
+ *
+ * Held here rather than looked up, because `validate` runs deep inside the
+ * toolkit with no access to config and no business reading the filesystem.
+ * main.js resolves it once at startup and again after any deploy, and the
+ * toolkit refuses momentum whenever it is not ok - so a preview can never
+ * describe a modifier the mod has no definition for.
+ *
+ * The default permits. That is deliberate and it is the one place this module
+ * does not fail closed: a unit test or a simulator run has no deployed mod to
+ * inspect, and defaulting to "refuse" would make momentum untestable without a
+ * CK3 install. Every path that can actually reach a game goes through main.js,
+ * which sets this unconditionally - including when the mod is missing entirely.
+ * `checked` records which of the two situations is in force so the sidebar can
+ * say "unverified" rather than imply it has looked.
+ */
+let support = { ok: true, version: null, reason: '', checked: false };
+
+/** @param {{ok: boolean, version: string|null, reason: string}} next */
+export function setMomentumSupport(next) {
+  support = { ...next, checked: true };
+}
+
+/** @returns {{ok: boolean, version: string|null, reason: string, checked: boolean}} */
+export function momentumSupport() {
+  return support;
+}
+
 /** @param {unknown} key */
 export function isMomentum(key) {
   return typeof key === 'string' && Object.hasOwn(MOMENTUM, key);
