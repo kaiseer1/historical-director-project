@@ -168,6 +168,47 @@ permission.
 `mod/common/modifiers/hd_modifiers.txt`, so the mod must be redeployed and CK3
 restarted, and the descriptor is at 0.4.0.
 
+## 3b. What a live campaign found, v0.4.1 and v0.4.2
+
+The first real session with v0.4 was worth more than the harness. Four things
+came out of reading `error.log` and `debug.log` from a 1250 Caliphate of Arabia
+save that the tests could not have found.
+
+**Three localization entries had been unreadable for versions.** CK3 wants one
+entry per line; three event descriptions wrapped, so the reader treated the
+continuation as a new entry and dropped it. `hd_event.0100`–`0102` had no
+description at all. Nothing in the harness had ever rendered a string - the
+smoke test speaks the wire protocol end to end and never looks at a `.yml` -
+so `scripts/check-localization.mjs` now does, and it is verified against both
+real bugs by reintroducing them and watching it fail.
+
+**The deployed mod was a version behind the orchestrator.** Momentum applies a
+character modifier the mod has to define; a stale mod means the sidebar promises
+a thousand gold, a thousand piety and thirty years of belligerence, the player
+approves, and half of it happens while the applied record still says `ok`. The
+toolkit now reads the deployed descriptor and refuses momentum outright rather
+than describing effects that cannot land.
+
+**The sphere had outgrown the rules that assumed it was small.** At reach 4 from
+Cairo the sphere ran to Bengal across 124 realms, and the Director proposed
+granting the King of France a claim on the Almoravids - two realms on opposite
+edges of the window, neither of them the player. Bounded attention had become
+unbounded agency. `grant_claim`, `set_relations` and `trigger_event` now need at
+least one party within two steps of the player. `adjust_title_tier` stays global.
+
+**The cadence was being reset by its own restarts.** 29 audits across six
+in-game years against a five-year cadence, because `lastAuditYear` lived only in
+memory. It is now persisted, and a restart takes one free snapshot instead of a
+paid audit.
+
+**And a fifth, which is a lesson rather than a bug.** `hd_toolkit_effects.txt`
+and most of `hd_perception_effects.txt` had been dead since the orchestrator
+started composing its own script, and they were not harmless: they produced an
+error on every load, documented a wire format that had stopped being true, and
+made the mod read as though it implemented a toolkit it had not implemented for
+months. Deleted. The mod is down to `hd_heartbeat` and `hd_mark_alive`, which is
+the property that let v0.3 widen the sphere with no mod change at all.
+
 ## 4. How it got here
 
 Ordered, because each fix was only visible once the one before it was out of the way.

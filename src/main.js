@@ -56,7 +56,7 @@ if (process.argv.includes('--selftest')) {
   console.log(`config    : reads from ${cfg.root}`);
   const missing = [];
   if (renderer.length < 3) missing.push('sidebar files');
-  if (mod.length < 12) missing.push('companion mod files');
+  if (mod.length < 11) missing.push('companion mod files');
   if (regions.length < 20) missing.push('region catalogue');
   if (missing.length) {
     console.error(`\nINCOMPLETE BUILD: ${missing.join(', ')}`);

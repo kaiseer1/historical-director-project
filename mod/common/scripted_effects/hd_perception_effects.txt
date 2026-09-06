@@ -1,174 +1,41 @@
-﻿# Historical Director - Perception layer
+﻿# Historical Director - the two effects the mod still owns
 #
-# Emits a filtered world-state snapshot into logs/debug.log over the same
-# debug_log channel VOTC uses, but under the distinct "HD:" prefix so that
-# both mods can run side by side without either parser seeing the other's data.
+# Everything else that used to live here is gone, and the reason is worth
+# recording. Perception and the whole action toolkit were originally scripted
+# effects called with parameters - hd_snapshot_region = { REGION = ... },
+# hd_grant_claim = { ACTOR = ... } - and that does not survive contact with the
+# engine: CK3 mangles $PARAM$ substitution inside a quoted debug_log string, so
+# every record carrying one came back unparseable and snapshots never arrived.
 #
-# Wire format (fields separated by /;/):
-#   HD:/;/snapshot_begin/;/<token>/;/<date>/;/<totalDays>/;/<playerId>
-#   HD:/;/realm/;/<id>/;/<ruler>/;/<primaryTitle>/;/<tier>/;/<countiesInSphere>/;/
-#      <culture>/;/<faith>/;/<capital>/;/<dynasty>/;/<house>/;/<independent>/;/<government>
-#   HD:/;/snapshot_end/;/<token>/;/<realmCount>
-#   HD:/;/date/;/<date>/;/<totalDays>
+# The orchestrator composes that script itself now (src/bridge/ck3Script.js),
+# with the values already literal by the time CK3 sees them. The old effects sat
+# here unused for several versions afterwards, which cost three things: an
+# error in error.log on every load ("Variable 'hd_counties' is used but is never
+# set", because the setter was in an effect nothing called), a documented wire
+# format that had silently stopped being accurate, and a mod that read as
+# though it implemented a toolkit it had not implemented for months.
 #
-# A snapshot is: one hd_snapshot_begin, one or more hd_snapshot_region (the
-# sphere of influence), then one hd_snapshot_end. Realms are de-duplicated
-# across regions, so overlapping regions are safe to pass.
+# The upside of keeping the mod down to these two primitives is real and has
+# been collected more than once: v0.3 widened the sphere, added a realm-footprint
+# probe and changed the snapshot sweep, and needed no mod change and no game
+# restart at all.
+#
+# Wire format is documented where it is produced, in src/bridge/ck3Script.js and
+# src/bridge/protocol.js.
 
-hd_snapshot_begin = {
-	clear_global_variable_list = hd_realm_set
-	debug_log = "HD:/;/snapshot_begin/;/$TOKEN$/;/[GetCurrentDate.GetStringShort]/;/[GetCurrentDate.GetDateAsTotalDays]/;/[GetPlayer.GetID]"
-}
-
-# Walk every landed county in the region up to its top liege, collecting the
-# distinct set of realms and, in the same pass, how many counties each of them
-# holds inside the sphere. Regional footprint is the figure the Director wants
-# to compare against history, so counting it here costs nothing extra.
-hd_snapshot_region = {
-	every_county_in_region = {
-		region = $REGION$
-		limit = { exists = holder }
-		holder = {
-			top_liege = {
-				if = {
-					limit = {
-						NOT = { is_target_in_global_variable_list = { name = hd_realm_set target = this } }
-					}
-					add_to_global_variable_list = { name = hd_realm_set target = this }
-					set_variable = { name = hd_counties value = 0 }
-				}
-				change_variable = { name = hd_counties add = 1 }
-			}
-		}
-	}
-}
-
-hd_log_realm = {
-	debug_log = "HD:/;/realm/;/[THIS.Char.GetID]/;/[THIS.Char.GetTitledFirstNameNicknamedNoTooltipRegnal]/;/[THIS.Char.GetPrimaryTitle.GetNameNoTooltip]/;/[THIS.Char.GetPrimaryTitle.GetRankConcept]/;/[THIS.Var('hd_counties').GetValue]/;/[THIS.Char.GetCulture.GetName]/;/[THIS.Char.GetFaith.GetName]/;/[THIS.Char.GetCapitalLocation.GetNameNoTooltip]/;/[THIS.Char.GetDynasty.GetName]/;/[THIS.Char.GetHouse.GetName]/;/[THIS.Char.IsIndependentRuler]/;/[THIS.Char.GetGovernment.GetNameNoTooltip]"
-	remove_variable = hd_counties
-}
-
-hd_snapshot_end = {
-	every_in_global_list = {
-		variable = hd_realm_set
-		hd_log_realm = yes
-	}
-	debug_log = "HD:/;/snapshot_end/;/$TOKEN$"
-	clear_global_variable_list = hd_realm_set
-}
-
-# Cheap date heartbeat, so the orchestrator can track in-game time without
-# paying for a full snapshot on every tick.
+# --- Heartbeat -------------------------------------------------------------
+# Cheap date tick, so the orchestrator can track in-game time without paying for
+# a full snapshot on every pass. Called from hd_yearly_on_action and from the
+# startup event.
 hd_heartbeat = {
 	debug_log = "HD:/;/date/;/[GetCurrentDate.GetStringShort]/;/[GetCurrentDate.GetDateAsTotalDays]"
 }
 
-# --- Locating the player ---------------------------------------------------
-# The sphere of influence has to start somewhere, and the orchestrator cannot
-# work out where the player sits from county names alone. Rather than snapshot
-# the world to find out, we ask the engine directly: test the player's capital
-# against every region the base game defines, and log the hits.
-#
-# Two things here were learned the hard way. The tests run inside every_player
-# rather than trusting the run file's root scope, because `capital_county`
-# needs a character scope and the ?= makes a missing one fail silently - a
-# player sitting in Rayy reported no region at all, despite Rayy being squarely
-# inside world_persia. And it probes every region rather than a curated few,
-# because a curated list is a promise to keep curating it and each omission
-# costs a restart to discover. Sixty-odd triggers is nothing; the orchestrator
-# decides which of the hits it is willing to reason about.
-
-hd_probe_region = {
-	if = {
-		limit = {
-			capital_county.title_province ?= { geographical_region = $REGION$ }
-		}
-		debug_log = "HD:/;/in_region/;/$REGION$"
-	}
-}
-
-hd_locate_player = {
-	every_player = {
-		debug_log = "HD:/;/locate_begin/;/[THIS.Char.GetID]/;/[THIS.Char.GetCapitalLocation.GetNameNoTooltip]/;/[THIS.Char.GetCulture.GetName]/;/[THIS.Char.GetFaith.GetName]/;/[THIS.Char.GetPrimaryTitle.GetNameNoTooltip]/;/[THIS.Char.GetPrimaryTitle.GetRankConcept]/;/[GetCurrentDate.GetStringShort]"
-
-		hd_probe_region = { REGION = world_africa }
-		hd_probe_region = { REGION = world_africa_east }
-		hd_probe_region = { REGION = world_africa_north }
-		hd_probe_region = { REGION = world_africa_north_east }
-		hd_probe_region = { REGION = world_africa_north_west }
-		hd_probe_region = { REGION = world_africa_sahara }
-		hd_probe_region = { REGION = world_africa_west }
-		hd_probe_region = { REGION = world_asia }
-		hd_probe_region = { REGION = world_asia_and_india }
-		hd_probe_region = { REGION = world_asia_borneo }
-		hd_probe_region = { REGION = world_asia_cambodia }
-		hd_probe_region = { REGION = world_asia_china }
-		hd_probe_region = { REGION = world_asia_east }
-		hd_probe_region = { REGION = world_asia_indonesia }
-		hd_probe_region = { REGION = world_asia_japan }
-		hd_probe_region = { REGION = world_asia_khitan_steppe }
-		hd_probe_region = { REGION = world_asia_korea }
-		hd_probe_region = { REGION = world_asia_malaysia }
-		hd_probe_region = { REGION = world_asia_minor }
-		hd_probe_region = { REGION = world_asia_north_east }
-		hd_probe_region = { REGION = world_asia_philippines }
-		hd_probe_region = { REGION = world_asia_sakhalin_hokkaido }
-		hd_probe_region = { REGION = world_asia_shiwei_steppe }
-		hd_probe_region = { REGION = world_asia_southeast }
-		hd_probe_region = { REGION = world_asia_southeast_islands }
-		hd_probe_region = { REGION = world_asia_southeast_mainland }
-		hd_probe_region = { REGION = world_asia_sulawesi_maluku }
-		hd_probe_region = { REGION = world_asia_thailand }
-		hd_probe_region = { REGION = world_asia_vietnam }
-		hd_probe_region = { REGION = world_atlantic }
-		hd_probe_region = { REGION = world_burma }
-		hd_probe_region = { REGION = world_central_asia }
-		hd_probe_region = { REGION = world_daylam }
-		hd_probe_region = { REGION = world_europe }
-		hd_probe_region = { REGION = world_europe_east }
-		hd_probe_region = { REGION = world_europe_north }
-		hd_probe_region = { REGION = world_europe_south }
-		hd_probe_region = { REGION = world_europe_south_east }
-		hd_probe_region = { REGION = world_europe_south_italy }
-		hd_probe_region = { REGION = world_europe_west }
-		hd_probe_region = { REGION = world_europe_west_britannia }
-		hd_probe_region = { REGION = world_europe_west_francia }
-		hd_probe_region = { REGION = world_europe_west_germania }
-		hd_probe_region = { REGION = world_europe_west_iberia }
-		hd_probe_region = { REGION = world_himalaya }
-		hd_probe_region = { REGION = world_india }
-		hd_probe_region = { REGION = world_india_bengal }
-		hd_probe_region = { REGION = world_india_deccan }
-		hd_probe_region = { REGION = world_india_rajastan }
-		hd_probe_region = { REGION = world_jazira }
-		hd_probe_region = { REGION = world_kabulistan }
-		hd_probe_region = { REGION = world_khorasan }
-		hd_probe_region = { REGION = world_makran }
-		hd_probe_region = { REGION = world_mesopotamia }
-		hd_probe_region = { REGION = world_middle_east }
-		hd_probe_region = { REGION = world_middle_east_arabia }
-		hd_probe_region = { REGION = world_middle_east_jerusalem }
-		hd_probe_region = { REGION = world_middle_east_persia }
-		hd_probe_region = { REGION = world_persia }
-		hd_probe_region = { REGION = world_persian_empire }
-		hd_probe_region = { REGION = world_siberia }
-		hd_probe_region = { REGION = world_steppe }
-		hd_probe_region = { REGION = world_steppe_central }
-		hd_probe_region = { REGION = world_steppe_east }
-		hd_probe_region = { REGION = world_steppe_tarim }
-		hd_probe_region = { REGION = world_steppe_west }
-		hd_probe_region = { REGION = world_tibet }
-		hd_probe_region = { REGION = world_transoxiana }
-
-		debug_log = "HD:/;/locate_end/;/[THIS.Char.GetID]"
-	}
-}
-
-# --- Pump liveness ------------------------------------------------------
-# Called at the end of every batch the orchestrator stages. The yearly
-# watchdog in hd_on_actions.txt reads this flag to decide whether the pump
-# still exists, so the mark has to come from script the pump actually ran,
-# not from anything the game does on its own.
+# --- Pump liveness ---------------------------------------------------------
+# Called at the top of every batch the orchestrator stages. The yearly watchdog
+# in hd_on_actions.txt reads this flag to decide whether the execution pump
+# still exists, so the mark has to come from script the pump actually ran, not
+# from anything the game does on its own.
 hd_mark_alive = {
 	set_global_variable = { name = hd_pump_alive value = 1 }
 }
