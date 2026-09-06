@@ -792,6 +792,58 @@ function rings() {
   try { fs.unlinkSync(clockPath); } catch { /* already gone */ }
 }
 
+// --- 41-43. realms the baseline never saw -----------------------------------
+// The baseline is scoped to the sphere it was captured from. A player who moves
+// their capital or widens the reach acquires realms it never held - not because
+// they are new, but because nobody was looking. A live campaign hit exactly
+// this: a 1218 baseline taken in Iberia, a player now at Cairo in 1250, and
+// almost every realm in the sphere unknown to it.
+
+{
+  // Mid-campaign baseline, realm absent from it, empire tier, not on the
+  // 1178 roster: the bookmark tables can speak even though the baseline cannot.
+  const seen = { id: 20, ruler: 'Someone', title: 'Kingdom of Navarra', rank: 'Kingdom', tierKey: 'kingdom' };
+  const b = baselineAt(1218, seen);
+  const unseen = { id: 21, ruler: 'al-Mustansir', title: 'Empire of Caliphate of Arabia', rank: 'Empire', tierKey: 'empire' };
+  const now = snapshot({ token: '50', date: '1250.1.1', totalDays: 456252, realms: [unseen] });
+  const r = validateProposal({ action: 'adjust_title_tier', args: { actor: 21, target_tier: 'kingdom' } }, now, b);
+  check(
+    '41. a realm the baseline never saw still reaches the bookmark tables',
+    r.ok,
+    r.ok ? r.preview : 'REJECTED, so moving your capital silences the Director: ' + r.error,
+  );
+}
+
+{
+  // Same situation at a rank the tables say nothing about: still refused, and
+  // the reason now says which kind of silence it is.
+  const seen = { id: 22, ruler: 'Someone', title: 'Kingdom of Navarra', rank: 'Kingdom', tierKey: 'kingdom' };
+  const b = baselineAt(1218, seen);
+  const unseen = { id: 23, ruler: 'A Sheikh', title: 'Sheikhdom of Aden', rank: 'Duchy', tierKey: 'duchy' };
+  const now = snapshot({ token: '51', date: '1250.1.1', totalDays: 456252, realms: [unseen] });
+  const r = validateProposal({ action: 'adjust_title_tier', args: { actor: 23, target_tier: 'county' } }, now, b);
+  check(
+    '42. but an unremarkable one is still refused, and says why accurately',
+    !r.ok && /never saw/.test(r.error) && /No reference, so no claim/.test(r.error),
+    r.ok ? 'ACCEPTED, so absence has become licence' : r.error,
+  );
+}
+
+{
+  // A bookmark-start baseline is unchanged: it saw the whole opening map of its
+  // sphere, so absence from it is still meaningful and still refuses.
+  const seen = { id: 24, ruler: 'Philippe', title: 'Kingdom of France', rank: 'Kingdom', tierKey: 'kingdom' };
+  const b = baselineAt(1066, seen);
+  const unseen = { id: 25, ruler: 'Bohemond', title: 'Principality of Antioch', rank: 'Empire', tierKey: 'empire' };
+  const now = snapshot({ token: '52', date: '1100.1.1', totalDays: 401000, realms: [unseen] });
+  const r = validateProposal({ action: 'adjust_title_tier', args: { actor: 25, target_tier: 'kingdom' } }, now, b);
+  check(
+    '43. a bookmark-start baseline is unaffected and still refuses the unseen',
+    !r.ok && /was not present when the baseline was captured/.test(r.error),
+    r.ok ? 'ACCEPTED, which loosens the case the baseline exists to guard' : r.error,
+  );
+}
+
 try { fs.unlinkSync(tmp); } catch { /* already gone */ }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);

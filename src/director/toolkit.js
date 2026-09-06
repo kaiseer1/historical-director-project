@@ -434,21 +434,32 @@ export const TOOLKIT = {
 
       const d = baseline.delta(realm);
       const name = realm.primaryTitle ?? 'this realm';
-      if (!d.known) {
-        return `${name} was not present when the baseline was captured, so the Director has no reference for its rank and cannot say it has risen`;
-      }
       if (d.risen) return null;
 
-      // Rank unchanged since the baseline. What that proves depends entirely on
-      // when the baseline was taken, and for a long time this code did not ask.
+      // What the baseline's silence proves depends entirely on when it was
+      // taken, and for a long time this code did not ask.
       if (!baseline.midCampaign) {
+        // Captured at a bookmark, so it is the map as shipped and its silence
+        // is informative both ways.
+        if (!d.known) {
+          return `${name} was not present when the baseline was captured, so the Director has no reference for its rank and cannot say it has risen`;
+        }
         return `${name} has stood at ${observed} tier since the campaign began (${d.label}); that is the map as it started, not drift`;
       }
 
-      // The baseline was captured well after a bookmark, so "unchanged" means
-      // "unchanged since the save was loaded" and carries no evidence about the
-      // world at all. That is not a reason to permit the demotion - it is a
-      // reason to go and find a reference, which is what bookmarkTiers holds.
+      // Mid-campaign, where the baseline is not a claim about the world at all.
+      // Absence from it is not a second, separate refusal: the baseline is
+      // scoped to the sphere it was captured from, so a player who moves their
+      // capital or widens the reach acquires realms it never saw - not because
+      // they are new, but because nobody was looking. A 1218 baseline taken in
+      // Iberia knows nothing about Egypt, and treating that as "no reference"
+      // silenced the Director across a whole campaign's worth of map.
+      //
+      // The bookmark tables are a separate reference and do not depend on
+      // having seen the realm before, so both cases consult them below. They
+      // still refuse unless there is a curated expectation or an empire the
+      // roster does not carry.
+
       const expectation = expectationFor(realm, state.year);
 
       if (expectation.kind === 'named') {
@@ -461,7 +472,14 @@ export const TOOLKIT = {
       // the honest answer.
       if (expectation.kind === 'unlisted-empire') return null;
 
-      return `${name} is unchanged since the baseline, but that baseline was captured at ${baseline.capturedYear} - mid-campaign - so it cannot tell drift from the map as loaded, and the ${expectation.bookmark} tables carry no expectation for this realm. No reference, so no claim`;
+      // Two ways to arrive here, and the reason has to say which: the baseline
+      // saw this realm and it has not moved, or the baseline never saw it at
+      // all. Neither is evidence, but reporting the second as the first would
+      // be the same class of error the mid-campaign work exists to correct.
+      const silence = d.known
+        ? `${name} is unchanged since the baseline`
+        : `the baseline never saw ${name}, because it was captured from a different part of the map`;
+      return `${silence}, and that baseline was taken at ${baseline.capturedYear} - mid-campaign - so it cannot tell drift from the map as loaded. The ${expectation.bookmark} tables carry no expectation for this realm either. No reference, so no claim`;
     },
     preview(a, state) {
       const actor = state.realmsById.get(safeInt(a.actor));
