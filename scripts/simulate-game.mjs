@@ -112,7 +112,15 @@ function emitSnapshot(token) {
       // Every realm in these small scenarios sits in the player's own regions,
       // so all of them are neighbours. A real sweep marks only those actually
       // holding land in a home region.
-      emit(`HD:/;/realm_home/;/${r[0]}`);
+      //
+      // A scenario lists ids in `distant` to put them on the rim of the sphere,
+      // which is how the locality rule gets exercised: home implies near, so a
+      // realm that is neither cannot be pushed into anyone. Realm rows are
+      // arrays, so the opt-out is keyed on the id rather than a row property.
+      if (!(scenario.distant ?? []).includes(r[0])) {
+        emit(`HD:/;/realm_home/;/${r[0]}`);
+        emit(`HD:/;/realm_near/;/${r[0]}`);
+      }
     }
   }
   emit(`HD:/;/snapshot_end/;/${token}`);

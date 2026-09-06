@@ -27,6 +27,17 @@ import path from 'node:path';
 
 const cfg = loadConfig();
 
+/**
+ * How far out still counts as the player's neighbourhood, in adjacency steps.
+ *
+ * Not a setting. The sphere's width is a judgement about what the Director
+ * should watch and pay attention to; this is a claim about what it is entitled
+ * to *act* on, and letting a player widen it would defeat the rule it exists to
+ * support. Two steps is the old default sphere - the window everything before
+ * v0.3 operated in.
+ */
+const NEIGHBOURHOOD_REACH = 2;
+
 // Placed before anything is constructed, because the point is to prove the
 // build is intact without touching a CK3 folder, writing a ledger, or opening a
 // port. scripts/build-exe.mjs runs this against the .exe it has just produced:
@@ -71,7 +82,7 @@ const state = {
   year: 0,
   totalDays: 0,
   location: null,
-  sphere: { regions: [], home: [], footprint: [], unsupported: [], note: '' },
+  sphere: { regions: [], home: [], footprint: [], near: [], unsupported: [], note: '' },
   snapshot: null,
   /** @type {any[]} */
   proposals: [],
@@ -152,8 +163,9 @@ function requestLocate() {
 /**
  * @param {string[]} regions the sphere
  * @param {string[]} homeRegions the player's own ground, swept first
+ * @param {string[]} nearRegions the neighbourhood the locality rule acts on
  */
-function requestSnapshot(regions, homeRegions) {
+function requestSnapshot(regions, homeRegions, nearRegions) {
   if (regions.length === 0) {
     log('no supported regions in the sphere; nothing to snapshot');
     state.pending = null;
@@ -161,7 +173,7 @@ function requestSnapshot(regions, homeRegions) {
   }
   state.pendingSince = Date.now();
   const token = runFile.nextToken();
-  runFile.write(snapshotScript(regions, token, homeRegions), token);
+  runFile.write(snapshotScript(regions, token, homeRegions, nearRegions), token);
   log(`requested a snapshot of ${labelList(regions)}`);
 }
 
@@ -221,9 +233,23 @@ tailer.on('record', async (rec) => {
       log(`player located: ${out.location.title} at ${out.location.capital}. ${state.sphere.note}`);
       broadcast('state', publicState());
       runFile.clear();
+      // The neighbourhood: the same seeds, grown at most two steps. At reach 2
+      // or less this is the whole sphere and the locality rule is a no-op,
+      // which is correct - a narrow sphere is all neighbourhood. At reach 4 it
+      // is the difference between a war on your border and one in Bengal.
+      state.sphere.near = seedSphere(out.location.regions, {
+        reach: Math.min(NEIGHBOURHOOD_REACH, cfg.director.sphereReach),
+        max: cfg.director.sphereMax,
+        footprint: out.location.realmRegions ?? [],
+      }).regions;
+
       // Home *and* footprint count as the player's own ground for the sweep:
       // both are regions they rule in, and both should lead the prompt table.
-      requestSnapshot(state.sphere.regions, [...state.sphere.home, ...state.sphere.footprint]);
+      requestSnapshot(
+        state.sphere.regions,
+        [...state.sphere.home, ...state.sphere.footprint],
+        state.sphere.near,
+      );
       break;
     }
 

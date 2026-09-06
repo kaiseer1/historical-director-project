@@ -72,6 +72,17 @@ export class SnapshotAssembler {
         return null;
       }
 
+      case 'realm_near': {
+        // The wider of the two rings: within the player's neighbourhood rather
+        // than sharing ground with them. Home realms are marked both, so this
+        // is a superset of realm_home.
+        if (!this.pending) return null;
+        const nearId = Number(rec.fields[0]);
+        const nearTarget = this.pending.realms.find((r) => r.id === nearId);
+        if (nearTarget) nearTarget.inNeighbourhood = true;
+        return null;
+      }
+
       case 'snapshot_end': {
         if (!this.pending) return null;
         const snap = this.pending;
@@ -189,7 +200,15 @@ export function renderRealmTable(snapshot, max = 40, baseline = null) {
     // Named in the row rather than left implicit in the ordering. The model
     // reads rows, not slice boundaries, and "neighbour" is the difference
     // between a realm it can act on and one it can only describe.
-    const where = r.inHomeRegion ? ' | neighbour' : '';
+    //
+    // Three rings, because at reach 4 the sphere is wide enough that the
+    // difference matters: home ground, the neighbourhood the toolkit may act
+    // in, and the rim the Director watches but cannot arrange wars across.
+    const where = r.inHomeRegion
+      ? ' | neighbour'
+      : r.inNeighbourhood
+        ? ' | nearby'
+        : ' | distant, watch only';
     // "Since start" is the column that separates drift from the bookmark as
     // shipped. Without it every audit re-argues the opening map, and a realm
     // that has stood at its historical rank since 1066 reads exactly like one

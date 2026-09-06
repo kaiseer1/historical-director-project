@@ -51,6 +51,10 @@ function snapshot({ token = '1', date = '1066.9.15', totalDays = 389_000, realms
       `/;/${r.culture ?? 'Frankish'}/;/${r.faith ?? 'Catholic'}/;/Paris/;/Capet/;/House Capet/;/yes/;/Feudal`,
     );
     if (r.tierKey) feed(`HD:/;/realm_tier/;/${r.id}/;/${r.tierKey}`);
+    // Three rings. Default is home, which implies near; a case sets ring
+    // 'near' or 'distant' to move a realm outwards.
+    if ((r.ring ?? 'home') === 'home') feed(`HD:/;/realm_home/;/${r.id}`);
+    if ((r.ring ?? 'home') !== 'distant') feed(`HD:/;/realm_near/;/${r.id}`);
   }
   return feed(`HD:/;/snapshot_end/;/${token}`).snapshot;
 }
@@ -647,6 +651,100 @@ const claim = (args, snap) => validateProposal({ action: 'grant_claim', args }, 
     support.ok ? 'v' + support.version + ', momentum available' : support.reason,
   );
   fs.rmSync(current, { recursive: true, force: true });
+}
+
+// --- 34-38. locality -------------------------------------------------------
+// Seeing a realm and being entitled to act on it stopped being the same thing
+// when the sphere became a dial. At reach 4 an Egyptian player's sphere reaches
+// Bengal, and the Director proposed granting the King of France a claim on the
+// Almoravids: two realms on opposite edges of the window, neither of them the
+// player. Bounded attention had become unbounded agency.
+
+/** Two rulers on the rim of the sphere, and one next door. */
+function rings() {
+  return snapshot({
+    token: '40',
+    date: '1250.1.1',
+    totalDays: 456252,
+    realms: [
+      { id: 1, ruler: 'al-Mustansir', title: 'Caliphate of Arabia', rank: 'Empire', tierKey: 'empire', faith: 'Zaydism', ring: 'home' },
+      { id: 2, ruler: 'Louis IX', title: 'Kingdom of France', rank: 'Kingdom', tierKey: 'kingdom', faith: 'Catholic', ring: 'distant' },
+      { id: 3, ruler: 'Abu Yaqub', title: 'the Almoravid Sultanate', rank: 'Kingdom', tierKey: 'kingdom', faith: 'Maliki', ring: 'distant' },
+      { id: 4, ruler: 'Bohemond', title: 'Principality of Antioch', rank: 'Duchy', tierKey: 'duchy', faith: 'Catholic', ring: 'near' },
+    ],
+  });
+}
+
+{
+  // The exact proposal from the 1250 campaign.
+  const snap = rings();
+  const r = validateProposal({ action: 'grant_claim', args: { actor: 2, target: 3 } }, snap, null);
+  check(
+    '34. locality refuses a claim between two realms on the rim',
+    !r.ok && /at least one party/.test(r.error),
+    r.ok ? 'ACCEPTED, which is the France-Almoravids proposal all over again' : r.error,
+  );
+}
+
+{
+  const snap = rings();
+  const near = validateProposal({ action: 'grant_claim', args: { actor: 4, target: 3 } }, snap, null);
+  const home = validateProposal({ action: 'grant_claim', args: { actor: 1, target: 3 } }, snap, null);
+  check(
+    '35. but allows one where either party is near or at home',
+    near.ok && home.ok,
+    near.ok ? 'nearby actor and home actor both permitted' : near.error,
+  );
+  check(
+    '35b. and the preview says the other party is far away',
+    home.ok && /lies outside your neighbourhood/.test(home.preview),
+    home.ok ? home.preview : home.error,
+  );
+}
+
+{
+  const snap = rings();
+  const rel = validateProposal({ action: 'set_relations', args: { actor: 2, target: 3, value: -50 } }, snap, null);
+  const evt = validateProposal({ action: 'trigger_event', args: { actor: 2, event: 'hd_event.0100' } }, snap, null);
+  check(
+    '36. set_relations and trigger_event are bound by the same rule',
+    !rel.ok && /at least one party/.test(rel.error) && !evt.ok && /at least one party/.test(evt.error),
+    rel.ok || evt.ok ? 'one of them ACCEPTED' : 'both refused',
+  );
+}
+
+{
+  // adjust_title_tier corrects the shape of the map, which is worth doing
+  // wherever it has gone wrong. It must stay global.
+  const realm = { id: 5, ruler: 'Someone', title: 'the invented Empire', rank: 'Empire', tierKey: 'empire', ring: 'distant' };
+  const b = baselineAt(1218, realm);
+  const now = snapshot({ token: '41', date: '1250.1.1', totalDays: 456252, realms: [realm] });
+  const r = validateProposal({ action: 'adjust_title_tier', args: { actor: 5, target_tier: 'kingdom' } }, now, b);
+  check(
+    '37. adjust_title_tier stays global, and the empire check with it',
+    r.ok,
+    r.ok ? 'a distant unlisted empire is still correctable' : 'REJECTED: ' + r.error,
+  );
+}
+
+{
+  // Degrade, do not fail closed. A snapshot with no marking at all means the
+  // marking did not happen, not that nothing is near.
+  const unmarked = snapshot({
+    token: '42',
+    date: '1250.1.1',
+    totalDays: 456252,
+    realms: [
+      { id: 6, ruler: 'A', title: 'Realm A', rank: 'Kingdom', tierKey: 'kingdom', ring: 'distant' },
+      { id: 7, ruler: 'B', title: 'Realm B', rank: 'Kingdom', tierKey: 'kingdom', ring: 'distant' },
+    ],
+  });
+  const r = validateProposal({ action: 'grant_claim', args: { actor: 6, target: 7 } }, unmarked, null);
+  check(
+    '38. an unmarked snapshot is treated as missing data, not as a refusal',
+    r.ok && !/lies outside/.test(r.preview),
+    r.ok ? 'permitted, and the preview makes no distance claim it cannot support' : r.error,
+  );
 }
 
 try { fs.unlinkSync(tmp); } catch { /* already gone */ }

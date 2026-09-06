@@ -100,18 +100,30 @@ export function locateScript(regions, footprintRegions = []) {
  * clears the marks, because a variable left on a title outlives the batch and
  * would silently zero the next audit's count.
  *
- * Home regions are swept first so that a county lying in two of them is
- * attributed to the one the player actually lives in.
+ * ## Two rings, not one
  *
- * @param {string[]} regions the sphere, home regions first
+ * Realms are marked twice over, because two different questions are being
+ * asked. `hd_home` means "holds land where the player does", and orders the
+ * prompt table. `hd_near` means "within the player's neighbourhood", and is
+ * what the locality rule in the toolkit acts on: at reach 4 a sphere runs from
+ * Iberia to Bengal, and the Director was proposing wars between two realms on
+ * opposite edges of it, neither of them the player. Home implies near.
+ *
+ * Sweeping in order - home, then near, then the rest - means a county lying in
+ * two regions is attributed to the innermost ring that contains it.
+ *
+ * @param {string[]} regions the sphere
  * @param {number} token
- * @param {string[]} [homeRegions] the subset that is the player's own ground
+ * @param {string[]} [homeRegions] where the player's own realm holds land
+ * @param {string[]} [nearRegions] the neighbourhood; home is added to it
  */
-export function snapshotScript(regions, token, homeRegions = []) {
+export function snapshotScript(regions, token, homeRegions = [], nearRegions = []) {
   const home = new Set(homeRegions);
+  const near = new Set([...homeRegions, ...nearRegions]);
 
-  // Sweep home regions before the rest, whatever order the sphere arrived in.
-  const ordered = [...regions].sort((a, b) => Number(home.has(b)) - Number(home.has(a)));
+  // Innermost ring first, whatever order the sphere arrived in.
+  const ring = (r) => (home.has(r) ? 2 : near.has(r) ? 1 : 0);
+  const ordered = [...regions].sort((a, b) => ring(b) - ring(a));
 
   const sweeps = ordered.flatMap((r) => [
     'every_county_in_region = {',
@@ -134,6 +146,8 @@ export function snapshotScript(regions, token, homeRegions = []) {
     // Marks the realm as one of the player's own neighbours, so the prompt
     // table can lead with them instead of with whatever is largest.
     ...(home.has(r) ? ['\t\t\tset_variable = { name = hd_home value = 1 }'] : []),
+    // And the wider ring the locality rule acts on.
+    ...(near.has(r) ? ['\t\t\tset_variable = { name = hd_near value = 1 }'] : []),
     '\t\t}',
     '\t}',
     '}',
@@ -207,6 +221,11 @@ export function snapshotScript(regions, token, homeRegions = []) {
     '\t\tlimit = { has_variable = hd_home }',
     '\t\tdebug_log = "HD:/;/realm_home/;/[THIS.Char.GetID]"',
     '\t\tremove_variable = hd_home',
+    '\t}',
+    '\tif = {',
+    '\t\tlimit = { has_variable = hd_near }',
+    '\t\tdebug_log = "HD:/;/realm_near/;/[THIS.Char.GetID]"',
+    '\t\tremove_variable = hd_near',
     '\t}',
     '\tremove_variable = hd_counties',
     '\tchange_global_variable = { name = hd_idx add = 1 }',

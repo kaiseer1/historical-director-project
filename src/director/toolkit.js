@@ -93,6 +93,75 @@ function tagOf(state, id) {
 }
 
 /**
+ * The locality rule: at least one party must be in the player's neighbourhood.
+ *
+ * Seeing a realm and being entitled to act on it stopped being the same thing
+ * when the sphere became a dial. At reach 1 they coincided, because everything
+ * in a six-region window was a neighbour. At reach 4 an Egyptian player's
+ * sphere reaches Bengal, and the Director duly proposed granting the King of
+ * France a claim on the Almoravids - two realms on opposite edges of the
+ * window, neither of them the player, in a war the player has no stake in.
+ * Bounded attention had quietly become unbounded agency.
+ *
+ * The rule applies to the actions that push two rulers into each other, and not
+ * to `adjust_title_tier`. That one corrects the shape of the map rather than
+ * anyone's relations, and an empire the record does not carry is worth naming
+ * wherever it sits: the empire-tier check in bookmarkTiers is deliberately
+ * global and stays that way.
+ *
+ * Degrades rather than fails closed. If no realm in the snapshot carries the
+ * mark, the marking did not happen - a truncated log, or an orchestrator older
+ * than the record - and refusing everything would be reading missing data as a
+ * verdict. A snapshot where the marking *did* run always has at least one
+ * marked realm, because the player is standing in their own home region.
+ *
+ * @param {any} state the live snapshot
+ * @param {Array<number|null>} ids the parties, any one of which may satisfy it
+ * @param {string} what phrasing for the refusal
+ * @returns {string|null}
+ */
+function requireLocality(state, ids, what) {
+  const realms = [...(state?.realmsById?.values?.() ?? [])];
+  if (!realms.some((r) => r.inNeighbourhood)) return null;
+
+  const parties = ids.map((id) => state.realmsById.get(id)).filter(Boolean);
+  if (parties.some((r) => r.inNeighbourhood)) return null;
+
+  const names = parties.map((r) => r.primaryTitle || r.ruler);
+  const named = names.join(' and ');
+  const verb = names.length > 1 ? 'lie' : 'lies';
+  return `${what} needs at least one party inside the player's neighbourhood; ${named || 'neither party'} ${verb} out towards the edge of the sphere, where the Director watches but does not act`;
+}
+
+/**
+ * The clause a preview gains when one party is far away.
+ *
+ * The rule permits an action where *either* party is near, so a proposal can
+ * legitimately reach a realm on the far side of the sphere as long as it is
+ * your neighbour doing the reaching. That is a materially different thing from
+ * a border quarrel and the preview should not read identically, so it says
+ * which party is distant. Silent when the marking is absent or when everyone
+ * involved is close by.
+ *
+ * @param {any} state
+ * @param {Array<number|null>} ids
+ * @returns {string}
+ */
+function distanceNote(state, ids) {
+  const realms = [...(state?.realmsById?.values?.() ?? [])];
+  if (!realms.some((r) => r.inNeighbourhood)) return '';
+
+  const distant = ids
+    .map((id) => state.realmsById.get(id))
+    .filter((r) => r && !r.inNeighbourhood);
+  if (distant.length === 0) return '';
+
+  const names = distant.map((r) => r.primaryTitle || r.ruler);
+  const verb = names.length > 1 ? 'lie' : 'lies';
+  return ` ${names.join(' and ')} ${verb} outside your neighbourhood, so this reaches well beyond your own borders.`;
+}
+
+/**
  * @typedef {object} Action
  * @property {string} signature
  * @property {string} description
@@ -189,13 +258,14 @@ export const TOOLKIT = {
       if (target === null || !state.realmsById.has(target)) return `target ${a.target} is not a ruler in the snapshot`;
       if (actor === target) return 'actor and target are the same character';
       if (value === null || value < -100 || value > 100) return 'value must be between -100 and 100';
-      return null;
+      return requireLocality(state, [actor, target], 'set_relations');
     },
     preview(a, state) {
       const actor = state.realmsById.get(safeInt(a.actor));
       const target = state.realmsById.get(safeInt(a.target));
       const dir = safeInt(a.value) < 0 ? 'hostility towards' : 'goodwill towards';
-      return `Set ${actor?.ruler ?? a.actor}'s ${dir} ${target?.ruler ?? a.target} to ${safeInt(a.value)}.`;
+      const base = `Set ${actor?.ruler ?? a.actor}'s ${dir} ${target?.ruler ?? a.target} to ${safeInt(a.value)}.`;
+      return base + distanceNote(state, [safeInt(a.actor), safeInt(a.target)]);
     },
     toScript: (a, token, state) => [
       ...resolveTagged(tagOf(state, safeInt(a.actor)), 'hd_actor'),
@@ -265,7 +335,11 @@ export const TOOLKIT = {
       // The third is whether this momentum can be justified against these two
       // realms. A holy war between co-religionists is not a holy war, and the
       // snapshot already carries the faiths needed to say so.
-      return MOMENTUM[momentum].requires(state.realmsById.get(actor), state.realmsById.get(target));
+      const justified = MOMENTUM[momentum].requires(state.realmsById.get(actor), state.realmsById.get(target));
+      if (justified) return justified;
+
+      // And last, whether this is the Director's war to arrange at all.
+      return requireLocality(state, [actor, target], 'grant_claim');
     },
     preview(a, state) {
       const actor = state.realmsById.get(safeInt(a.actor));
@@ -275,7 +349,9 @@ export const TOOLKIT = {
       // differently from a claim on a duchy.
       const tier = target?.tierKey ? `the ${target.tierKey}-tier title ` : '';
       const claim = `Grant ${actor?.ruler ?? a.actor} a pressed claim on ${tier}${target?.primaryTitle ?? 'the target primary title'}, held by ${target?.ruler ?? a.target}.`;
-      return claim + momentumPreview(momentumOf(a.momentum), actor?.ruler ?? String(a.actor));
+      return claim
+        + momentumPreview(momentumOf(a.momentum), actor?.ruler ?? String(a.actor))
+        + distanceNote(state, [safeInt(a.actor), safeInt(a.target)]);
     },
     toScript: (a, token, state) => [
       ...resolveTagged(tagOf(state, safeInt(a.actor)), 'hd_actor'),
@@ -479,11 +555,15 @@ export const TOOLKIT = {
       if (!known.includes(id)) {
         return `no such Director event "${a.event}"; the events that exist are ${known.join(', ')}`;
       }
-      return null;
+      // Only one party here, so "at least one" means the recipient themselves.
+      // These events offer a claim on acceptance, which is grant_claim by
+      // another route and belongs under the same rule.
+      return requireLocality(state, [actor], 'trigger_event');
     },
     preview(a, state) {
       const actor = state.realmsById.get(safeInt(a.actor));
-      return `Send a Director narrative event to ${actor?.ruler ?? a.actor}.`;
+      return `Send a Director narrative event to ${actor?.ruler ?? a.actor}.`
+        + distanceNote(state, [safeInt(a.actor)]);
     },
     toScript: (a, token, state) => [
       ...resolveTagged(tagOf(state, safeInt(a.actor)), 'hd_actor'),
