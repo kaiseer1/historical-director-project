@@ -3,11 +3,15 @@
 Everything you need to run this without help. If something goes wrong, section 6 lists every failure
 that has actually happened, with its cause and fix.
 
-Project folder:
+**Project folder.** Wherever you cloned or unzipped this repository. Every command in this guide is
+run from there, so open a terminal and change into it once at the start of a session:
 
+```bash
+cd path/to/historical-director-project
 ```
-C:\Users\BASIL\Pictures\historical director project
-```
+
+On Windows that path is usually `C:\Users\<you>\Documents\historical-director-project` or wherever
+you put it; the commands below assume you are already inside it.
 
 ---
 
@@ -18,13 +22,15 @@ Three things, in this order.
 **1 — Start the orchestrator.** Open a terminal:
 
 ```bash
-cd "C:\Users\BASIL\Pictures\historical director project" && npm start
+npm start
 ```
 
 Leave it running. It prints its settings and then `watching for the game`.
 
-**2 — Start CK3**, load your save. The game must be launched with `-debug_mode` (yours already is —
-that is how Voices of the Court works too).
+**2 — Start CK3**, load your save. **The game must be launched with `-debug_mode`.** Set it in Steam:
+right-click Crusader Kings III, Properties, Launch Options, and add `-debug_mode`. Without it the
+bridge has no `debug_log` and no console `run`, and nothing will happen at all. Voices of the Court
+requires the same flag, so if you already run VOTC you are already set up for this.
 
 **3 — Arm the pump.** Open the console with the **`** key (backtick, top-left) and type:
 
@@ -139,7 +145,7 @@ and does need a restart.
 
 ```json
 {
-  "ck3UserFolder": "C:/Users/BASIL/Documents/Paradox Interactive/Crusader Kings III",
+  "ck3UserFolder": "C:/Users/YOU/Documents/Paradox Interactive/Crusader Kings III",
   "port": 7842,
   "llm": {
     "baseUrl": "https://api.deepseek.com",
@@ -228,7 +234,7 @@ does - a line in `error.log` and nothing in the game. No trigger can guard again
 
 
 ```bash
-cd "C:\Users\BASIL\Pictures\historical director project" && node scripts/deploy-mod.mjs
+node scripts/deploy-mod.mjs
 ```
 
 Most changes are in `src/`. The mod now holds only small parameter-free pieces, so it rarely needs
@@ -356,7 +362,7 @@ Launch with `-debug_mode` and have the pump running, or nothing will execute.
 Start here:
 
 ```bash
-cd "C:\Users\BASIL\Pictures\historical director project" && node scripts/doctor.mjs
+node scripts/doctor.mjs
 ```
 
 It checks Node, the CK3 folder, `debug.log`, the run folder, whether the mod is deployed, and whether

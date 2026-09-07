@@ -2,6 +2,30 @@
 
 A human-in-the-loop LLM framework for historically-grounded gameplay in **Crusader Kings III**.
 
+---
+
+## Alpha software — read this before you run it
+
+**This is an experimental alpha that stages script into a running game.** It has been exercised
+across a handful of campaigns, not a hundred. Treat it accordingly.
+
+- **Back up your saves first.** Approved actions change the world permanently and the game has no
+  undo for them. `adjust_title_tier` destroys a ruler's primary title and releases the vassals
+  underneath it, which can reshape a region in one stroke. Copy your CK3 `save games` folder
+  somewhere safe before you start, and prefer a throwaway campaign for your first session.
+- **CK3 must be launched with `-debug_mode`.** The whole bridge is built on the `debug_log` effect
+  and the console `run` command, and neither exists without that flag. Without it nothing happens at
+  all — no error, no snapshot, no proposals. Note that `-debug_mode` also disables achievements for
+  that session; this is a CK3 restriction and cannot be worked around.
+- **Nothing reaches the game until you press Approve.** That is the design rather than a safety net,
+  and it is worth understanding as a limit: the Director cannot act while you are not looking, and it
+  also cannot correct a mistake you approved.
+- **Expect rough edges.** What has actually been watched working, and what has not, is catalogued
+  honestly in [PROGRESS.md](PROGRESS.md); the failures that have really occurred and their fixes are
+  in [RUNNING.md](RUNNING.md). Please report anything new.
+
+---
+
 CK3's AI advances the world competently but without historical direction. Within decades a campaign
 drifts into configurations that contradict the medieval record, and the game offers no setting to
 counteract it. The Historical Director treats historical fidelity as an external service: it watches
@@ -18,17 +42,18 @@ hallucination problem has a human arbiter, and the latency problem has a player 
 
 ## What works today
 
-This is v0.3 — a testing alpha. A complete vertical slice, not a finished mod.
+This is **v0.4.2** — a testing alpha. A complete vertical slice, not a finished mod.
 
 | | |
 |---|---|
 | Perception | Regional world-state snapshots: rulers, titles, tiers, footprint, culture, faith, government |
 | Sphere of influence | Seeded from where the player rules — capital *and* realm footprint — then grown as far outward as you set it |
 | Knowledge layer | Wikipedia lead extracts, era-filtered + Wikidata reign intervals and dynasty spans |
-| Toolkit | `spawn_character`, `set_relations`, `grant_claim`, `adjust_title_tier`, `trigger_event` |
-| Macro events | `iberian_pressure` — one approval sets a regional process running; intensity bounded by live state |
-| Narrative cards | Every proposal carries in-world prose written from the lore and the live campaign together |
-| Momentum | `grant_claim` can also supply the means to press a claim — money, the resource the war costs, and a timed appetite for it. It never starts the war |
+| Toolkit | `spawn_character` (optionally born into a named house and carrying a pressed claim), `set_relations`, `grant_claim`, `adjust_title_tier`, `trigger_event`, `iberian_pressure` |
+| Macro events | `iberian_pressure` (`hd_event.0200`) — one approval sets a regional process running across a unifier and up to four partners. Intensity is checked against a band computed from the live map, so a crusade in a world that will not support one is refused rather than obeyed. Transfers no title, starts no war |
+| Narrative cards | Every proposal carries in-world prose written from the lore and the live campaign together. The prose is a sibling of the action, never a parameter to it: a narrative offered as an action argument is rejected as an unexpected parameter, so nothing free-text can reach the composed script |
+| Momentum | `grant_claim` can also supply the means to press a claim — money, the resource the war costs, and a timed appetite for it. Three pre-authored patterns (`reconquista`, `holy_war`, `succession_pressure`), each a fixed set of effects reached by lookup rather than composed by the model. It never starts the war |
+| Destructive cap | At most one `adjust_title_tier` per audit, enforced in the Director rather than requested in the prompt. A second demotion in the same audit is rejected and reported, so a bad audit cannot dissolve two realms at once |
 | Governance | Encyclopedic sidebar, auto-pause, Approve / Decline, every verdict logged |
 | Settings | Audit cadence, sphere reach and ceiling, and the model — all changed from the sidebar, no restart |
 | Lore Book | Persistent ledger of approvals *and* declines, re-injected into later audits |
@@ -252,6 +277,27 @@ scripts/
 - **The bookmark tables are three dates.** A campaign at 1300 is measured against 1178, and a hundred
   and twenty years of legitimate change is change those tables cannot account for. They only ever
   permit a proposal the baseline could not reach; absence from them is never treated as licence.
+
+## Attribution
+
+**The debug-log bridge is not an original idea.** CK3 exposes no state-export API, and the technique
+this project depends on — reading `logs/debug.log` for perception, and driving the game from outside
+through a self-recreating GUI widget that calls `ExecuteConsoleCommand` — was worked out by the wider
+CK3 modding community well before this project existed.
+
+The clearest precedent, and the direct architectural influence here, is **Voices of the Court**
+(Durond, and the 2.0 reimplementation by MrAndroPC), which solved the same perception-and-execution
+problem first, for conversational play. This project read how VOTC does it and then applied the same
+three mechanisms to a different problem: auditing the shape of the map rather than voicing the people
+on it.
+
+That inheritance is why every record this mod writes is prefixed `HD:`. VOTC's traffic is prefixed
+`VOTC:`, so the two remain disjoint in a shared `debug.log` and **both mods can be installed and run
+side by side.** The run files are separate for the same reason.
+
+The Historical Director is an independent project. It is not affiliated with or endorsed by Voices of
+the Court, and contains none of its code. Crusader Kings III is a trademark of Paradox Interactive,
+who are likewise unaffiliated with this project.
 
 ## Licence
 

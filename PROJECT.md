@@ -5,7 +5,7 @@
 Basil Abdullah Alzahrani — Department of Artificial Intelligence, Al-Baha University
 Independent Game-AI Research & Mod Development
 
-Status: **v0.1 alpha**, working end to end against a live game.
+Status: **v0.4.2 alpha**, working end to end against a live game.
 Companion implementation to the paper *The Historical Director: A Human-in-the-Loop LLM Framework
 for Historically-Grounded Gameplay in Crusader Kings III*.
 
@@ -197,6 +197,16 @@ than chosen freely, and every named realm must belong to it. What the event then
 and leverage - truces, alliances, hooks, a decision - and never an outcome: no title changes hands,
 no war begins, and every recipient can decline what it offers.
 
+**How a macro event reaches the game at all.** A CK3 event takes no parameters, so there is no way
+to call one with arguments. Everything a macro event needs is therefore staged *before* it fires: the
+unifier and each partner are resolved into numbered saved scopes (`scope:hd_unifier`,
+`scope:hd_partner_1` through `hd_partner_4`), and the intensity travels as a global variable the
+event branches on. `hd_event.0200` reads both and holds every effect itself. The orchestrator side
+composes no effect text at all — `macroEvents.js` picks an intensity out of a fixed table by key, and
+a key that is not in the table yields no script rather than a malformed line. That is the same
+lookup-not-interpolation property `momentum.js` relies on, and it is what keeps a multi-realm action
+inside the same safety argument as a two-character one.
+
 **The narrative on a card cannot become a mechanic.** Each proposal carries three to five sentences
 of in-world prose, written from the retrieved lore and the live state together. It reaches the
 sidebar and the Lore Book and nothing else. `toScript` is built from the action and its declared
@@ -289,6 +299,14 @@ world, which is far too large, but the decision record.
 
 Declines are kept as carefully as approvals. A Director that only remembered what was accepted would
 re-propose the same rejected correction every year, and the player would stop reading.
+
+**At most one demotion is offered per audit.** `adjust_title_tier` is the bluntest verb in the
+toolkit and the one that reads as most decisive, and two dissolutions approved in a single sitting
+can take a region apart faster than any historical process did. So the Director accepts one per
+audit and rejects the rest with a stated reason. This is deliberately cruder than better judgement,
+and deliberately not a line in the prompt: a prompt rule depends on the model having judgement on the
+audit where it matters, and a counter does not. It also changes what an audit costs the model —
+spending its one demotion is now a choice about what it is *not* proposing.
 
 ---
 
@@ -507,17 +525,30 @@ making the system say what it did, what it is about to do, and — when it refus
 mod/                        the CK3 companion mod
   common/scripted_effects/    param-free primitives
   common/on_action/           bootstrap + pump watchdog
-  common/decisions/           the recall decision
+  common/decisions/           the recall decision, the Iberian union decision
+  common/modifiers/           momentum and Iberian-pressure modifiers
+  common/opinion_modifiers/   the opinion set_relations applies
   gui/custom_gui/             the execution pump
-  events/                     bootstrap + proposal notification
+  events/                     bootstrap, notification, narrative events, hd_event.0200
+  localization/english/       every key the mod's script references
 
 src/
   bridge/                     protocol, log tailer, run-file handshake, script composer
   model/WorldState.js         a stream of records becomes a snapshot
-  director/                   regions, sphere of influence, toolkit, the Director
+  model/Baseline.js           the map as the campaign began
+  model/AuditClock.js         the cadence, persisted across restarts
+  director/regions.js         the region catalogue and its adjacency graph
+  director/sphere.js          what the Director is allowed to see
+  director/toolkit.js         the actions, their validation and their script
+  director/macroEvents.js     the Macro Event Library: intensity band, staged scopes
+  director/momentum.js        the pre-authored amplifications of grant_claim
+  director/bookmarkTiers.js   what the record says, at 867 / 1066 / 1178
+  director/Director.js        the audit loop, the prompt, the destructive cap
   knowledge/                  Wikipedia + Wikidata retrieval
   lore/LoreBook.js            the ledger
   llm/client.js               OpenAI-compatible client, no SDK
+  setup/                      mod deployment and preflight
+  runtime.js                  source checkout, executable, or test harness
   renderer/                   the sidebar
 
 scripts/
@@ -526,6 +557,11 @@ scripts/
   simulate-game.mjs           a fake CK3, for testing without launching the game
   stub-llm.mjs                a fake model, including deliberately malformed output
   make-probe.mjs              validate perception against a running campaign
+  smoke.mjs                   the whole loop against a fake game and a fake model
+  check-tier-fixes.mjs        the toolkit, baseline-gate, macro-event and locality cases
+  check-regions.mjs           the region catalogue's invariants
+  check-localization.mjs      every key the mod references is defined
+  verify-toolkit.mjs          stage one action into a live game, bypassing approval
 ```
 
 Zero runtime dependencies. Node 20+. Runs with `npm start`.

@@ -15,6 +15,7 @@
  *   node scripts/check-regions.mjs
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { REGIONS, PROBE_REGIONS, supportedRegions, isSupported, label } from '../src/director/regions.js';
 import { seedSphere } from '../src/director/sphere.js';
@@ -63,16 +64,56 @@ const phase1 = supportedRegions();
 }
 
 // --- 2. every catalogued and probed id is a real region ----------------------
-const GAME_PATHS = [
-  'C:/Program Files (x86)/Steam/steamapps/common/Crusader Kings III',
-  'C:/Program Files/Steam/steamapps/common/Crusader Kings III',
-  'A:/SteamLibrary/steamapps/common/Crusader Kings III',
-  'B:/SteamLibrary/steamapps/common/Crusader Kings III',
-  'D:/SteamLibrary/steamapps/common/Crusader Kings III',
-];
+/**
+ * Where CK3 might be installed.
+ *
+ * This list used to be five absolute paths, three of which were the drive
+ * letters on the machine it was written on. That works on exactly one computer.
+ * Nothing here is a user-specific path any more: the Windows entries come from
+ * the environment rather than an assumed `C:`, the library roots are probed
+ * across whichever drives actually exist, and the Linux and macOS defaults hang
+ * off `os.homedir()`.
+ *
+ * `HD_CK3_GAME_DIR` overrides all of it, which is the documented answer for an
+ * install this cannot guess - a second Steam library, a GOG copy, or a CI
+ * machine with the game mounted somewhere arbitrary.
+ *
+ * @returns {string[]}
+ */
+function candidateGameDirs() {
+  const override = process.env.HD_CK3_GAME_DIR ?? process.env.CK3_GAME_DIR;
+  if (override) return [override];
+
+  const suffix = path.join('steamapps', 'common', 'Crusader Kings III');
+  const dirs = [];
+
+  if (process.platform === 'win32') {
+    // Program Files, wherever this Windows install actually puts it.
+    for (const env of ['ProgramFiles(x86)', 'ProgramFiles', 'ProgramW6432']) {
+      const base = process.env[env];
+      if (base) dirs.push(path.join(base, 'Steam', suffix));
+    }
+    // Secondary Steam libraries, which conventionally sit at the root of a
+    // drive. Probe the drives that exist rather than guessing letters.
+    for (let c = 'A'.charCodeAt(0); c <= 'Z'.charCodeAt(0); c += 1) {
+      const drive = `${String.fromCharCode(c)}:\\`;
+      if (!fs.existsSync(drive)) continue;
+      dirs.push(path.join(drive, 'SteamLibrary', suffix));
+      dirs.push(path.join(drive, 'Steam', suffix));
+      dirs.push(path.join(drive, 'Games', 'Steam', suffix));
+    }
+  } else if (process.platform === 'darwin') {
+    dirs.push(path.join(os.homedir(), 'Library', 'Application Support', 'Steam', suffix));
+  } else {
+    dirs.push(path.join(os.homedir(), '.steam', 'steam', suffix));
+    dirs.push(path.join(os.homedir(), '.local', 'share', 'Steam', suffix));
+  }
+
+  return dirs;
+}
 
 function gameRegionFile() {
-  for (const base of GAME_PATHS) {
+  for (const base of candidateGameDirs()) {
     const f = path.join(base, 'game', 'map_data', 'geographical_regions', 'geographical_region.txt');
     if (fs.existsSync(f)) return f;
   }
@@ -82,7 +123,7 @@ function gameRegionFile() {
 const regionFile = gameRegionFile();
 
 if (!regionFile) {
-  skip('2. ids exist in the game files', 'CK3 install not found; checked the usual Steam paths');
+  skip('2. ids exist in the game files', 'CK3 install not found; checked the usual Steam paths. Set HD_CK3_GAME_DIR to point at it');
   skip('3. Phase I is a partition', 'same');
 } else {
   const clean = fs.readFileSync(regionFile, 'utf8').replace(/#[^\r\n]*/g, '');

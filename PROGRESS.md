@@ -6,7 +6,7 @@ Where the Historical Director actually stands, as distinct from what it is desig
 Kept honest: a thing is "working" here only if it has been watched working, and everything that has
 not been is listed as such.
 
-**Status:** v0.3 alpha · branch `fix/baseline-gate-v0.2`
+**Status:** v0.4.2 alpha · branch `feat/public-release-prep`
 **Last live test:** 4 September 2026, a 1217 Banu Zahir campaign
 **Last harness test:** 4 September 2026 — 26 tier and gate cases, 8 region cases, and the full loop
 end to end against the built executable
