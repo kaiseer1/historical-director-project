@@ -17,7 +17,7 @@
 import { resolveTagged } from '../bridge/ck3Script.js';
 import { expectationFor } from './bookmarkTiers.js';
 import { MOMENTUM, MOMENTUM_KEYS, isMomentum, momentumOf, momentumScript, momentumPreview, momentumSupport } from './momentum.js';
-import { INTENSITY, INTENSITY_KEYS, MAX_PARTNERS, intensityBand, iberianPressureScript } from './macroEvents.js';
+import { INTENSITY, INTENSITY_KEYS, MAX_PARTNERS, intensityBand, iberianPressureScript, inRegion, hasRegionData, IBERIA_REGION } from './macroEvents.js';
 
 /** Characters CK3 script treats structurally. Never let these through. */
 const UNSAFE = /["'{}\[\]$\\=#\r\n\t]/g;
@@ -163,27 +163,30 @@ function distanceNote(state, ids) {
 }
 
 /**
- * The cultures CK3 places on the Iberian peninsula.
+ * Is this realm on the Iberian peninsula?
  *
- * This is a proxy, and worth being honest about why. The snapshot reports which
- * regions the *player's* realm spans, not which region each other realm sits
- * in, so there is no way to ask "is this ruler inside Iberia" directly - the
- * perception limit recorded in PROJECT.md section 12. Culture is the closest
- * thing the snapshot actually carries, and on the peninsula it is a good one:
- * these cultures are Iberian wherever they are found, and a Castilian realm is
- * not somewhere else by accident.
+ * Geography where the snapshot reports it, culture only where it does not.
  *
- * Combined with the neighbourhood ring, which is checked separately, it is
- * close enough to bound a regional event. A realm of the wrong culture is
- * refused rather than guessed at.
+ * The first version of this was culture alone, on the reasoning that these
+ * cultures "are Iberian wherever they are found". A live campaign disproved
+ * that in one line: a Sheikhdom of Murzuk in Libya reads as Andalusian, and so
+ * did a player ruling from Cairo. Culture records where a dynasty came from,
+ * not where its land is, and after two centuries of conquest those are
+ * different questions.
+ *
+ * The sweep now reports which regions each realm holds land in, so the check is
+ * the real one. Culture remains as a fallback for a snapshot taken before that
+ * record existed, because refusing everything on missing data would read as a
+ * verdict rather than as a gap - the same reasoning requireLocality uses.
+ *
+ * @param {any} realm
+ * @param {boolean} geographyAvailable
+ * @returns {boolean}
  */
 const IBERIAN_CULTURES = /andalus|castil|catalan|portug|basque|galician|asturleon|aragon|mozarab|visigoth|suebi|navarr/i;
 
-/**
- * @param {any} realm
- * @returns {boolean}
- */
-function isIberian(realm) {
+function isIberian(realm, geographyAvailable) {
+  if (geographyAvailable) return inRegion(realm, IBERIA_REGION) === true;
   return IBERIAN_CULTURES.test(realm?.culture ?? '');
 }
 
@@ -620,11 +623,14 @@ export const TOOLKIT = {
       // Every named realm has to belong to the peninsula. See IBERIAN_CULTURES
       // for why this is culture rather than geography.
       const named = [unifier, ...partners];
+      const geography = hasRegionData(state);
       const outsiders = named
         .map((id) => state.realmsById.get(id))
-        .filter((r) => !isIberian(r));
+        .filter((r) => !isIberian(r, geography));
       if (outsiders.length) {
-        const names = outsiders.map((r) => `${r.primaryTitle || r.ruler} (${r.culture || 'unknown culture'})`);
+        const names = outsiders.map((r) => (geography
+          ? `${r.primaryTitle || r.ruler} (holds no land in Iberia)`
+          : `${r.primaryTitle || r.ruler} (${r.culture || 'unknown culture'})`));
         return `this is an Iberian event and ${names.join(', ')} ${outsiders.length > 1 ? 'are' : 'is'} not of the peninsula`;
       }
 

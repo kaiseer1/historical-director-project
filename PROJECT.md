@@ -424,6 +424,9 @@ making the system say what it did, what it is about to do, and — when it refus
 - **The bookmark tables are three dates and a short roster.** They can only permit a demotion the
   baseline could not reach, never widen one it already guards, and absence from them yields nothing.
   But a campaign at 1300 is measured against 1178, and they say nothing at all about the steppe.
+- **Realm geography is reported; per-county detail is not.** The sweep says which regions each realm
+  holds land in, which is what a regional action needs. It still does not report individual counties,
+  so county-level work waits on the richer perception in section 13.
 - **The toolkit is bounded by perception, not by ambition.** The snapshot reports top-liege rulers,
   addressed by tag. It does not report counties, and it does not report titles as objects. So
   county-level work — faith or culture conversion, granting a specific county — cannot be added to

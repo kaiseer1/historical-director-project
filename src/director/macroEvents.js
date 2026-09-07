@@ -112,69 +112,109 @@ export const INTENSITY = {
 
 export const INTENSITY_KEYS = Object.keys(INTENSITY);
 
+export const IBERIA_REGION = 'world_europe_west_iberia';
+
+/**
+ * Does this realm hold land in the region?
+ *
+ * Returns null rather than false when the snapshot carries no region records at
+ * all, so callers can tell "not there" from "we were not told" and degrade
+ * instead of refusing everything - the same distinction requireLocality draws.
+ *
+ * @param {any} realm
+ * @param {string} regionId
+ * @returns {boolean|null}
+ */
+export function inRegion(realm, regionId) {
+  if (!Array.isArray(realm?.regions)) return null;
+  return realm.regions.includes(regionId);
+}
+
+/** Whether any realm in the snapshot carries region records. */
+export function hasRegionData(state) {
+  return [...(state?.realmsById?.values?.() ?? [])].some((r) => Array.isArray(r.regions) && r.regions.length);
+}
+
 /**
  * The band of intensities the live world will support.
  *
- * The reasoning, in plain terms: pressure toward Iberian unification came from
- * the northern crowns having somewhere to push and the strength to push there.
- * So the band widens as Andalusian holdings in the sphere grow relative to the
- * Christian realms around them, and narrows when there is little left to press
- * against.
+ * Measured over the peninsula, not over the sphere. The first version divided
+ * Andalusian counties by every county in view, which was defensible when a
+ * sphere was six regions around the player and absurd once it could be twelve:
+ * in a live 1257 campaign it compared 192 Andalusian counties against 1016
+ * stretching from Nubia to Germania and concluded there was almost no pressure,
+ * when 191 of those 192 were the player's own empire sitting in Egypt.
  *
- * Returns the permitted keys plus the figures behind them, because a refusal
- * that does not say what it measured is not much of an explanation.
+ * Two things follow. The denominator is Iberian counties only, so the ratio
+ * describes the peninsula rather than the known world. And membership is
+ * geography rather than culture, because culture travels with conquest - the
+ * same campaign had an Andalusian sheikhdom in Libya and an Andalusian player
+ * in Cairo, neither of them anywhere near Iberia.
  *
  * @param {any} state the live snapshot
  * @param {any} [baseline]
- * @returns {{allowed: string[], andalusiCounties: number, northernCounties: number, ratio: number, reason: string}}
+ * @returns {{allowed: string[], andalusiCounties: number, christianCounties: number, ratio: number, reason: string, byGeography: boolean}}
  */
 export function intensityBand(state, baseline) {
   const realms = [...(state?.realmsById?.values() ?? [])];
+  const byGeography = hasRegionData(state);
 
-  // Culture is what the snapshot actually carries, and "Andalusian" is the
-  // culture CK3 names for the peninsula's Muslim polities. Faith is a poorer
-  // proxy: a Sunni realm in the Maghreb is not Iberian pressure.
+  // Without region records - an older orchestrator, or a truncated log - fall
+  // back to culture and say so, rather than refusing outright on missing data.
+  const onPeninsula = (r) => (byGeography
+    ? inRegion(r, IBERIA_REGION) === true
+    : /andalus|castil|catalan|portug|basque|galician|asturleon|aragon|mozarab|navarr/i.test(r.culture ?? ''));
+
+  const iberian = realms.filter(onPeninsula);
   const isAndalusi = (r) => /andalus/i.test(r.culture ?? '');
-  const andalusiCounties = realms.filter(isAndalusi).reduce((n, r) => n + (r.countiesInSphere ?? 0), 0);
-  const northernCounties = realms.filter((r) => !isAndalusi(r)).reduce((n, r) => n + (r.countiesInSphere ?? 0), 0);
 
-  const total = andalusiCounties + northernCounties;
+  // Counties held *in the sphere* is the only figure the snapshot carries, so a
+  // realm straddling the Strait contributes its whole footprint to whichever
+  // side its culture puts it on. Both sides are counted the same way, so the
+  // ratio stays meaningful even though neither number is exact.
+  const andalusiCounties = iberian.filter(isAndalusi).reduce((n, r) => n + (r.countiesInSphere ?? 0), 0);
+  const christianCounties = iberian.filter((r) => !isAndalusi(r)).reduce((n, r) => n + (r.countiesInSphere ?? 0), 0);
+
+  const total = andalusiCounties + christianCounties;
   const ratio = total > 0 ? andalusiCounties / total : 0;
+  const how = byGeography ? 'in Iberia' : 'of Iberian culture (this snapshot carries no geography)';
 
-  // Bands. A world with almost nothing Andalusian left has no unification
-  // pressure worth the name; a world where the peninsula is largely Andalusian
-  // will carry the strongest form.
   let allowed;
   let reason;
-  if (total === 0) {
+  if (iberian.length === 0) {
     allowed = [];
-    reason = 'no counties were reported in the sphere, so there is nothing to measure';
+    reason = byGeography
+      ? 'no realm in view holds land in Iberia, so there is no peninsula to apply pressure to'
+      : 'no realm in view is of an Iberian culture, and this snapshot carries no geography to check against';
+  } else if (total === 0) {
+    allowed = [];
+    reason = `realms ${how} hold no counties in the sphere, so there is nothing to measure`;
   } else if (ratio < 0.15) {
     allowed = [];
-    reason = `Andalusian realms hold ${andalusiCounties} of ${total} counties in the sphere, too little to describe as a pressure toward unification`;
+    reason = `Andalusian realms hold ${andalusiCounties} of ${total} counties ${how}, too little to describe as a pressure toward unification`;
   } else if (ratio < 0.35) {
     allowed = ['smoldering'];
-    reason = `Andalusian realms hold ${andalusiCounties} of ${total} counties, enough for a smoldering pressure and no more`;
+    reason = `Andalusian realms hold ${andalusiCounties} of ${total} counties ${how}, enough for a smoldering pressure and no more`;
   } else if (ratio < 0.6) {
     allowed = ['smoldering', 'fervent'];
-    reason = `Andalusian realms hold ${andalusiCounties} of ${total} counties, which supports a fervent pressure but not a crusade`;
+    reason = `Andalusian realms hold ${andalusiCounties} of ${total} counties ${how}, which supports a fervent pressure but not a crusade`;
   } else {
     allowed = ['smoldering', 'fervent', 'crusade'];
-    reason = `Andalusian realms hold ${andalusiCounties} of ${total} counties, which supports pressure of any intensity`;
+    reason = `Andalusian realms hold ${andalusiCounties} of ${total} counties ${how}, which supports pressure of any intensity`;
   }
 
   // The baseline sharpens this where it can: a peninsula that has grown more
   // Andalusian since the campaign began is under a live process, not a static
   // arrangement, and that is what the strongest tier is meant to describe.
   if (baseline?.captured && allowed.length && ratio >= 0.35) {
-    const grown = realms.some((r) => isAndalusi(r) && baseline.delta(r)?.risen);
+    const grown = iberian.some((r) => isAndalusi(r) && baseline.delta(r)?.risen);
     if (grown && !allowed.includes('crusade')) {
       allowed = [...allowed, 'crusade'];
-      reason += '; an Andalusian realm has risen in rank since the baseline, which admits the strongest tier';
+      reason += '; an Andalusian realm there has risen in rank since the baseline, which admits the strongest tier';
     }
   }
 
-  return { allowed, andalusiCounties, northernCounties, ratio, reason };
+  return { allowed, andalusiCounties, christianCounties, ratio, reason, byGeography };
 }
 
 /**

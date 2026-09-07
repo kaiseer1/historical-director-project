@@ -125,6 +125,28 @@ export function snapshotScript(regions, token, homeRegions = [], nearRegions = [
   const ring = (r) => (home.has(r) ? 2 : near.has(r) ? 1 : 0);
   const ordered = [...regions].sort((a, b) => ring(b) - ring(a));
 
+  // Where each realm actually is.
+  //
+  // The sweep walks one region at a time and already knows which region it is
+  // in, and until now it threw that away - so the only thing downstream could
+  // ask about a realm's location was its culture. That is a poor proxy, and a
+  // live campaign proved it: a Sheikhdom of Murzuk sitting in Libya reads as
+  // Andalusian, and a player ruling from Cairo reads as Iberian, because
+  // culture travels with conquest and geography does not.
+  //
+  // So each region's sweep is followed immediately by a pass over the realms it
+  // marked, emitting one record per realm per region. Deduplicated by the
+  // marker variable, so a realm holding forty counties in a region yields one
+  // record, and cleared before the next region so marks cannot bleed across.
+  const regionPass = (r) => [
+    'every_in_global_list = {',
+    '\tvariable = hd_realm_set',
+    '\tlimit = { has_variable = hd_in_region }',
+    `\tdebug_log = "HD:/;/realm_in_region/;/[THIS.Char.GetID]/;/${r}"`,
+    '\tremove_variable = hd_in_region',
+    '}',
+  ];
+
   const sweeps = ordered.flatMap((r) => [
     'every_county_in_region = {',
     `\tregion = ${r}`,
@@ -148,9 +170,12 @@ export function snapshotScript(regions, token, homeRegions = [], nearRegions = [
     ...(home.has(r) ? ['\t\t\tset_variable = { name = hd_home value = 1 }'] : []),
     // And the wider ring the locality rule acts on.
     ...(near.has(r) ? ['\t\t\tset_variable = { name = hd_near value = 1 }'] : []),
+    // Which region this realm was found in. Cleared by the pass below.
+    '\t\t\tset_variable = { name = hd_in_region value = 1 }',
     '\t\t}',
     '\t}',
     '}',
+    ...regionPass(r),
   ]);
 
   const unmark = ordered.flatMap((r) => [

@@ -18,7 +18,7 @@ import { AuditClock } from '../src/model/AuditClock.js';
 import { validateProposal } from '../src/director/toolkit.js';
 import { momentumScript, MOMENTUM_KEYS, setMomentumSupport } from '../src/director/momentum.js';
 import { compareVersions, deployedModVersion, momentumSupport } from '../src/setup/modVersion.js';
-import { INTENSITY, INTENSITY_KEYS, intensityBand } from '../src/director/macroEvents.js';
+import { INTENSITY, INTENSITY_KEYS, intensityBand, hasRegionData } from '../src/director/macroEvents.js';
 
 let passed = 0;
 let failed = 0;
@@ -57,6 +57,7 @@ function snapshot({ token = '1', date = '1066.9.15', totalDays = 389_000, realms
     // 'near' or 'distant' to move a realm outwards.
     if ((r.ring ?? 'home') === 'home') feed(`HD:/;/realm_home/;/${r.id}`);
     if ((r.ring ?? 'home') !== 'distant') feed(`HD:/;/realm_near/;/${r.id}`);
+    for (const reg of r.regions ?? []) feed(`HD:/;/realm_in_region/;/${r.id}/;/${reg}`);
   }
   return feed(`HD:/;/snapshot_end/;/${token}`).snapshot;
 }
@@ -934,6 +935,75 @@ function rings() {
     '49. a narrative offered as an action parameter is rejected',
     !poisoned.ok && /unexpected parameters/.test(poisoned.error),
     poisoned.ok ? 'ACCEPTED prose as a parameter' : poisoned.error,
+  );
+}
+
+// --- geography, not culture -------------------------------------------------
+// The bug a live 1257 campaign exposed: an Andalusian player in Cairo and an
+// Andalusian sheikhdom in Libya both read as Iberian, and the band divided
+// Andalusian counties by every county from Nubia to Germania.
+{
+  const IB = 'world_europe_west_iberia';
+  const EG = 'world_africa_north_east';
+  const MA = 'world_africa_north_west';
+  const bl = stubBaseline({ label: '= Duchy', risen: false, known: true });
+
+  const live = snapshot({
+    realms: [
+      { id: 1, ruler: 'Caliph', title: 'Empire of Caliphate of Arabia', rank: 'Empire', tierKey: 'empire', counties: 191, culture: 'Andalusian', regions: [EG] },
+      { id: 2, ruler: 'Sheikh', title: 'Sheikhdom of Murzuk', rank: 'Duchy', tierKey: 'duchy', counties: 1, culture: 'Andalusian', regions: [MA] },
+      { id: 3, ruler: 'Afonso', title: 'Kingdom of Portugal', rank: 'Kingdom', tierKey: 'kingdom', counties: 11, culture: 'Portuguese', regions: [IB] },
+      { id: 4, ruler: 'al-Mutamid', title: 'Taifa of Sevilla', rank: 'Duchy', tierKey: 'duchy', counties: 9, culture: 'Andalusian', regions: [IB] },
+      { id: 5, ruler: 'Fernando', title: 'Kingdom of Castile', rank: 'Kingdom', tierKey: 'kingdom', counties: 14, culture: 'Castilian', regions: [IB] },
+    ],
+  });
+
+  check(
+    '50. region records reach the snapshot',
+    hasRegionData(live) && live.realmsById.get(4).regions.includes(IB) && !live.realmsById.get(1).regions.includes(IB),
+    `Sevilla: ${live.realmsById.get(4).regions.join(',')} | Cairo: ${live.realmsById.get(1).regions.join(',')}`,
+  );
+
+  const band = intensityBand(live, bl);
+  check(
+    '51. the band measures the peninsula, not the whole sphere',
+    band.byGeography && band.andalusiCounties === 9 && band.christianCounties === 25,
+    band.reason,
+  );
+
+  const cairo = validateProposal(
+    { action: 'iberian_pressure', args: { unifier: 1, partners: [4], intensity: 'smoldering' } },
+    live, bl,
+  );
+  const libya = validateProposal(
+    { action: 'iberian_pressure', args: { unifier: 4, partners: [2], intensity: 'smoldering' } },
+    live, bl,
+  );
+  const proper = validateProposal(
+    { action: 'iberian_pressure', args: { unifier: 4, partners: [3, 5], intensity: 'smoldering' } },
+    live, bl,
+  );
+  check(
+    '52. a realm of Iberian culture outside Iberia is refused, one inside is not',
+    !cairo.ok && /holds no land in Iberia/.test(cairo.error)
+      && !libya.ok && /holds no land in Iberia/.test(libya.error)
+      && proper.ok,
+    `Cairo and Murzuk refused by geography; Sevilla with Portugal and Castile accepted`,
+  );
+
+  // And the fallback: a snapshot with no region records at all must not refuse
+  // everything, because missing data is not a verdict.
+  const legacy = snapshot({
+    realms: [
+      { id: 6, ruler: 'al-Mutamid', title: 'Taifa of Sevilla', rank: 'Duchy', tierKey: 'duchy', counties: 9, culture: 'Andalusian' },
+      { id: 7, ruler: 'Fernando', title: 'Kingdom of Castile', rank: 'Kingdom', tierKey: 'kingdom', counties: 14, culture: 'Castilian' },
+    ],
+  });
+  const legacyBand = intensityBand(legacy, bl);
+  check(
+    '53. without region records it falls back to culture and says so',
+    !legacyBand.byGeography && legacyBand.allowed.length > 0 && /no geography/.test(legacyBand.reason),
+    legacyBand.reason,
   );
 }
 

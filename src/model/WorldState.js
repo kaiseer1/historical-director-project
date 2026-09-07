@@ -46,6 +46,20 @@ export class SnapshotAssembler {
         }
         return null;
 
+      case 'realm_in_region': {
+        // Which regions a realm actually holds land in, one record per pair.
+        // Geography rather than culture: a realm's culture says where its
+        // rulers came from, not where the realm is.
+        if (!this.pending) return null;
+        const rid = Number(rec.fields[0]);
+        const inRegion = this.pending.realms.find((r) => r.id === rid);
+        if (inRegion) {
+          if (!Array.isArray(inRegion.regions)) inRegion.regions = [];
+          if (!inRegion.regions.includes(rec.fields[1])) inRegion.regions.push(rec.fields[1]);
+        }
+        return null;
+      }
+
       case 'realm_tier': {
         // Arrives as its own record right after the realm line it belongs to,
         // so the realm line's positional parse is untouched. Matched on
