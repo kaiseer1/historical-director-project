@@ -53,6 +53,7 @@ export class Director {
     const proposals = [];
     /** @type {string[]} */
     const rejected = [];
+    let demotionsThisAudit = 0;
 
     for (const p of raw.proposals ?? []) {
       const check = validateProposal(p, snapshot, this.baseline);
@@ -61,6 +62,20 @@ export class Director {
         this.log(`rejected proposal - ${check.error}`);
         continue;
       }
+      // At most one demotion per audit. The model reaches for adjust_title_tier
+      // because it is the bluntest verb available and reads as decisive, and two
+      // dissolutions approved in one sitting can take a region apart faster than
+      // any historical process did. A cap is cruder than better judgement, and
+      // unlike the prompt rule it does not depend on the model having any.
+      if (p.action === 'adjust_title_tier') {
+        if (demotionsThisAudit >= 1) {
+          rejected.push(`${p.action}: only one demotion is offered per audit, and this audit already has one`);
+          this.log('rejected proposal - a second demotion in the same audit');
+          continue;
+        }
+        demotionsThisAudit += 1;
+      }
+
       proposals.push({
         id: `${snapshot.token}-${proposals.length}`,
         action: p.action,
@@ -168,6 +183,10 @@ export class Director {
       'WHAT YOU MAY WATCH IS WIDER THAN WHAT YOU MAY ARRANGE.',
       'Each row is marked "neighbour" (the player\'s own ground), "nearby" (their neighbourhood), or "distant, watch only" (the rim of the sphere). grant_claim, set_relations and trigger_event all push rulers into each other, and every one of them needs at least one party marked neighbour or nearby. A claim granted to one distant realm against another distant realm is a war on the far side of the world in which the player has no stake, and it will be rejected however well argued. adjust_title_tier is not restricted this way: the shape of the map is worth correcting wherever it has gone wrong.',
       'Destroying an empire- or kingdom-tier primary title releases the vassals below it and can fragment a region in a single stroke. Treat it as a major intervention: propose it only at high confidence, and state that consequence plainly in the consequences field.',
+      '',
+      'PREFER BUILDING OVER BREAKING.',
+      'The toolkit can add to the world as well as subtract from it. A macro event sets a historical process in motion and lets the rulers inside it decide; spawn_character supplies a court that is missing one; grant_claim gives a ruler a reason to act. Reach for those first.',
+      'adjust_title_tier is the last resort, for drift that nothing constructive can address - not the default way of saying "this realm is wrong". At most one demotion is accepted per audit regardless, so spending the audit on one is a choice about what you are not proposing.',
       '- Returning zero proposals is a good answer when the world is on track. Do not invent work.',
       '',
       'Available actions:',
