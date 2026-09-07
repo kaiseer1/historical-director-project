@@ -301,4 +301,6 @@ who are likewise unaffiliated with this project.
 
 ## Licence
 
-GPL-3.0-only.
+MIT License
+Copyright (c) 2026 basil Abdullah AL Zahrani
+
