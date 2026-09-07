@@ -5,7 +5,8 @@
 Basil Abdullah Alzahrani — Department of Artificial Intelligence, Al-Baha University
 Independent Game-AI Research & Mod Development
 
-Status: **v0.4.2 alpha**, working end to end against a live game.
+Status: **v0.4.3 alpha**, working end to end against a live game.
+(The companion mod is still 0.4.2: it has not changed since, and the two are versioned separately.)
 Companion implementation to the paper *The Historical Director: A Human-in-the-Loop LLM Framework
 for Historically-Grounded Gameplay in Crusader Kings III*.
 
@@ -181,6 +182,21 @@ structurally, so nothing the model emits can escape into the run file as script.
 `primary_title.tier`, not the printed rank name, which is localised and can be renamed outright by a
 total conversion. A guard on a localised string stops guarding the moment someone plays in another
 language. Where the key is missing the action is refused, never permitted on the printed name.
+
+**The baseline measures three axes, and only one of them gates anything.** Rank is the axis that
+`adjust_title_tier` turns on. The other two are evidence: a realm still holding its title on a
+fraction of its land reports `= Kingdom, down 10 of 15 counties` in the same column, and realms the
+baseline recorded that are absent from the world now are listed in a prompt section of their own -
+which they have to be, because a table of what exists has no row for what does not. A live campaign
+was reported "on track" thirty-seven times while Iberia came apart around a Leon whose rank had not
+moved, and the footprint that would have caught it was already being captured and never read.
+
+Because county counts are taken inside the sphere, the sphere is stored with the baseline and both
+derived signals are reported only when the captured sphere is a subset of the current one: widening
+can only add counties and reveal realms, so under a wider window a loss is certainly real and an
+absence is certainly real. A narrowed window suppresses both, and a baseline older than the sphere
+record marks them rather than asserting them. Gains are never reported at all, since a wider window
+can manufacture a gain but cannot hide a loss.
 
 **Rank changes are measured against the campaign's own opening map.** A baseline captured from the
 first snapshot tells drift apart from the bookmark as shipped, so a realm that has stood at its

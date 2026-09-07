@@ -38,7 +38,7 @@ const SPARQL_ENDPOINT = 'https://query.wikidata.org/sparql';
 const API_ENDPOINT = 'https://www.wikidata.org/w/api.php';
 // Wikimedia's user-agent policy asks for a contact address, and traffic that
 // supplies one is throttled less aggressively than traffic that does not.
-const UA = 'HistoricalDirector/0.4.2 (https://github.com/kaiseer1/historical-director-project)';
+const UA = 'HistoricalDirector/0.4.3 (https://github.com/kaiseer1/historical-director-project)';
 
 /**
  * Only ever holds answers the endpoint actually gave. A lookup that failed in
