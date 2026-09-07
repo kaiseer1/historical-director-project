@@ -301,6 +301,6 @@ who are likewise unaffiliated with this project.
 
 ## Licence
 
-MIT License
-Copyright (c) 2026 basil Abdullah AL Zahrani
+**MIT.** Copyright (c) 2026 Basil Abdullah Al Zahrani. The full text is in
+[LICENSE](LICENSE).
 

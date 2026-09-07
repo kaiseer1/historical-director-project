@@ -594,4 +594,4 @@ for execution — was learned by reading **Voices of the Court** (Durond, and th
 by MrAndroPC), which solved the same problem first for conversational play. This project is
 independent of it and the two can run side by side.
 
-Licence: **GPL-3.0-only**.
+Licence: **MIT**. See [LICENSE](LICENSE).
