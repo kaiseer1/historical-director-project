@@ -19,6 +19,7 @@ import { validateProposal } from '../src/director/toolkit.js';
 import { momentumScript, MOMENTUM_KEYS, setMomentumSupport } from '../src/director/momentum.js';
 import { compareVersions, deployedModVersion, momentumSupport, macroSupport, MACRO_MIN_MOD } from '../src/setup/modVersion.js';
 import { setMacroSupport } from '../src/director/macroEvents.js';
+import { preflight } from '../src/setup/preflight.js';
 import { INTENSITY, INTENSITY_KEYS, intensityBand, hasRegionData } from '../src/director/macroEvents.js';
 
 let passed = 0;
@@ -1372,6 +1373,92 @@ function modAt(version) {
     !(!fresh.ok && /cannot be executed/.test(fresh.error)),
     fresh.ok ? 'permitted' : 'refused for a different, non-version reason: ' + fresh.error,
   );
+}
+
+// --- preflight's log window -------------------------------------------------
+// It used to read a flat 400 KB from the end of debug.log. A live install held
+// 13,161 HD records and none in that window, because another mod had written
+// past it in the five minutes since the last audit - so preflight told someone
+// whose mod was enabled, loaded and mid-audit to go and enable their mod. A
+// check that sends you to fix a thing that is not broken is worse than none.
+
+/** A CK3 folder whose debug.log is built to order. */
+function logWith(build) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hd-preflight-'));
+  fs.mkdirSync(path.join(dir, 'logs'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'run'), { recursive: true });
+  const logPath = path.join(dir, 'logs', 'debug.log');
+  fs.writeFileSync(logPath, build(), 'utf8');
+  return {
+    dir,
+    cfg: {
+      ck3UserFolder: dir,
+      debugLogPath: logPath,
+      llm: { apiKey: 'x', apiKeyEnv: 'HD_API_KEY' },
+    },
+  };
+}
+
+const heard = (findings) => findings.find((f) => f.label === 'the mod has written to the log');
+
+{
+  // The live failure, reproduced: HD records at the front, then far more than
+  // 400 KB of another mod's noise.
+  const noise = '[00:00:00][D][other_mod.cpp:1]: RICE something happened here\n'.repeat(40000);
+  const { dir, cfg } = logWith(() => 'HD:/;/date/;/1 Jan 1199/;/437637\n' + noise);
+  const f = heard(preflight(cfg));
+  const sizeMB = (fs.statSync(cfg.debugLogPath).size / 1024 / 1024).toFixed(1);
+  check(
+    'P1. a marker buried behind megabytes of other mods is still found',
+    f.ok && /most recent is/.test(f.detail),
+    f.ok ? f.detail + '  (log is ' + sizeMB + ' MB)' : 'MISSED: ' + f.detail,
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  // And a log with no HD records at all still fails, which is the whole point
+  // of the check. Widening the search must not make it answer "yes" to
+  // everything.
+  const { dir, cfg } = logWith(() => '[00:00:00][D][other.cpp:1]: nothing of ours\n'.repeat(20000));
+  const f = heard(preflight(cfg));
+  check(
+    'P2. a log genuinely without HD records still reports so',
+    !f.ok && /Enable the mod/.test(f.detail),
+    f.ok ? 'PASSED, so the check now says yes to anything' : f.detail,
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  // A recent record reports plainly, with no distance noise.
+  const { dir, cfg } = logWith(() => 'noise\n'.repeat(100) + 'HD:/;/snapshot_end/;/277884\n');
+  const f = heard(preflight(cfg));
+  check(
+    'P3. a recent record is reported without qualification',
+    f.ok && f.detail === 'found HD: records',
+    f.detail,
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  // The subtle one. The search reads backwards a megabyte at a time, so a
+  // marker lying across a chunk boundary would be split in half and missed
+  // without the overlap. Positioned so "HD:" straddles the first boundary.
+  const CHUNK = 1024 * 1024;
+  const { dir, cfg } = logWith(() => {
+    const tail = 'x'.repeat(CHUNK - 1);       // the last chunk, minus one byte
+    const head = 'y'.repeat(CHUNK);            // enough to force a second read
+    return head + 'HD:' + tail;                // "HD:" begins one byte before the boundary
+  });
+  const f = heard(preflight(cfg));
+  check(
+    'P4. a marker straddling a chunk boundary is not split in half and lost',
+    f.ok,
+    f.ok ? 'found across the boundary' : 'MISSED, so the chunk overlap is wrong',
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 try { fs.unlinkSync(tmp); } catch { /* already gone */ }
