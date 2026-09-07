@@ -70,6 +70,39 @@ function requestSection(snapshot, evidence, baseline) {
 }
 
 /**
+ * Realms the baseline recorded that are simply not there any more.
+ *
+ * Kept out of the realm table on purpose: the table lists what exists, and a
+ * realm's absence cannot be a row in it. For thirty-seven consecutive audits of
+ * a live campaign the most significant fact about Iberia was that Castile was
+ * gone, and there was nowhere in the prompt for that fact to appear.
+ *
+ * @param {any} snapshot
+ * @param {any} baseline
+ * @returns {string[]}
+ */
+function vanishedSection(snapshot, baseline) {
+  const gone = baseline?.vanished?.(snapshot);
+  if (!gone || gone.list.length === 0) return [];
+
+  const rows = gone.list.map(
+    (r) => `- ${r.primaryTitle} (${r.tierKey ?? 'unknown tier'}, held ${r.countiesInSphere} counties at capture)`,
+  );
+  const more = gone.total > gone.list.length ? [`- ... and ${gone.total - gone.list.length} further realms`] : [];
+  const caveat = gone.verified
+    ? 'These realms existed when this campaign was first observed and do not exist now.'
+    : 'These realms were recorded at capture and are absent now, but the observed window may have changed since, so confirm before relying on it.';
+
+  return [
+    '## Gone since the campaign began',
+    caveat,
+    ...rows,
+    ...more,
+    '',
+  ];
+}
+
+/**
  * The Historical Director.
  *
  * Runs one audit: take the world as the mod reported it, retrieve what the
@@ -109,6 +142,11 @@ export class Director {
   async audit(snapshot, sphere) {
     const year = snapshot.year;
     this.log(`auditing ${year} across ${labelList(sphere)} (${snapshot.realms.length} realms)`);
+
+    // Before anything reads a delta. The footprint and disappearance signals
+    // are only sound when this window contains the one the baseline was taken
+    // through, and this is how the baseline finds that out.
+    this.baseline?.observing?.(sphere);
 
     const evidence = await this.retrieve(snapshot, sphere, year);
     const raw = await this.propose(snapshot, sphere, evidence);
@@ -252,6 +290,10 @@ export class Director {
       'It compares each realm against the map as it stood when this campaign began. Propose adjust_title_tier ONLY where that column shows a rise, such as "Kingdom -> Empire". A realm reading "= Empire" has held that rank since the start: that is the bookmark as the game shipped it, not drift, however its ruler is described in the sources. Where the column reads "no baseline" you have no reference for that realm and must say so rather than propose against it.',
       'A rise is permission to look, not a reason to act. Legitimate rises happen - the Normans, the Almoravids - and the retrieved evidence still has to justify the correction.',
       '',
+      'RANK IS NOT THE ONLY WAY A REALM CAN DIVERGE.',
+      'The same column also reports ground lost since the campaign began - "= Kingdom, down 9 of 14 counties" is a realm that kept its crown and lost two thirds of its land, which the rank alone would report as no change at all. A polity the record shows dominant in this century, holding a fraction of what it started with, is a real divergence even though nothing about its tier has moved. So is a kingdom listed below as gone entirely. Neither is grounds for adjust_title_tier, which still requires a rise: they are grounds for the constructive actions, and for grant_claim in particular, where the record supports the recovery.',
+      'A figure marked with "?" was measured across a window that may have changed, so treat it as a reason to look rather than as a number to quote.',
+      '',
       'A COLUMN READING "= Empire SINCE LOAD" IS A DIFFERENT AND WEAKER STATEMENT.',
       'It appears when this campaign was joined from an existing save rather than started at a bookmark, so the reference map was captured mid-campaign. It means only that the realm has not changed rank since the save was loaded, which is a fact about the session and not about the world: the realm may have risen a century before the player ever saw it. For those realms the reference is the bookmark briefing below rather than the column, and a realm at empire tier that the briefing does not name is a divergence you may raise.',
       '',
@@ -317,6 +359,7 @@ export class Director {
       renderRealmTable(snapshot, this.maxRealmsInPrompt, this.baseline),
       '',
       ...(briefing ? ['## The record at the nearest bookmark', briefing, ''] : []),
+      ...vanishedSection(snapshot, this.baseline),
       '## Retrieved historical evidence',
       evidenceBlock,
       '',

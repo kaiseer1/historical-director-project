@@ -300,7 +300,9 @@ tailer.on('record', async (rec) => {
 
       // The first snapshot of a campaign becomes the reference every later
       // audit measures drift against.
-      const captured = baseline.offer(out.snapshot);
+      // The sphere goes in with it: county counts are only comparable across
+      // audits that looked through the same window or a wider one.
+      const captured = baseline.offer(out.snapshot, state.sphere.regions);
       if (captured === 'captured') {
         log(`baseline captured at ${out.snapshot.date}: this is the map drift is measured from`);
       } else if (captured === 'recaptured') {

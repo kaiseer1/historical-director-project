@@ -1125,6 +1125,159 @@ function bohemia() {
   );
 }
 
+// --- 60-66. footprint and disappearance -------------------------------------
+// Rank was the only axis the baseline measured, and a live 1197 campaign showed
+// what that misses: a Kingdom of Calatayud that never existed, an Aragon under a
+// King-Bishop, and no Castile at all - reported as "on track" for thirty-seven
+// consecutive audits, because Leon was a kingdom at capture and a kingdom still.
+
+const IB = ['world_europe_west_iberia', 'world_africa_north_west'];
+
+/** Iberia at capture, and the same Iberia after Castile is taken apart. */
+function iberiaAt(counties) {
+  return snapshot({
+    token: '60',
+    date: '1178.10.1',
+    totalDays: 430_000,
+    realms: [
+      { id: 60, ruler: 'Alfonso VIII', title: 'Kingdom of Castile', rank: 'Kingdom', tierKey: 'kingdom', counties: counties.castile, regions: IB },
+      { id: 61, ruler: 'Fernando II', title: 'Kingdom of León', rank: 'Kingdom', tierKey: 'kingdom', counties: counties.leon, regions: IB },
+      { id: 62, ruler: 'Sancho I', title: 'Kingdom of Portugal', rank: 'Kingdom', tierKey: 'kingdom', counties: 8, regions: IB },
+      { id: 63, ruler: 'Pedro', title: 'County of Tudela', rank: 'County', tierKey: 'county', counties: 1, regions: IB },
+    ],
+  });
+}
+
+{
+  const bl = fresh();
+  bl.offer(iberiaAt({ castile: 15, leon: 10 }), IB);
+  bl.observing(IB);
+
+  const now = iberiaAt({ castile: 5, leon: 10 });
+  const castile = bl.delta(now.realmsById.get(60));
+  const leon = bl.delta(now.realmsById.get(61));
+
+  check(
+    '60. a realm that kept its crown and lost its land now says so',
+    /= Kingdom, down 10 of 15 counties/.test(castile.label) && castile.risen === false,
+    castile.label,
+  );
+  check(
+    '60b. and a realm that lost nothing still reads as unchanged',
+    leon.label === '= Kingdom' && !leon.lost,
+    leon.label,
+  );
+  check(
+    '60c. losing ground is never a licence to demote',
+    validateProposal(
+      { action: 'adjust_title_tier', args: { actor: 60, target_tier: 'duchy' } }, now, bl,
+    ).ok === false,
+    'adjust_title_tier still requires a rise, not a fall',
+  );
+}
+
+{
+  // Widening the sphere adds counties to realms straddling the old edge, so a
+  // reported *gain* may be an artefact of the window. Losses cannot be.
+  const bl = fresh();
+  bl.offer(iberiaAt({ castile: 15, leon: 10 }), IB);
+  bl.observing(IB);
+  const grown = iberiaAt({ castile: 25, leon: 10 });
+  const d = bl.delta(grown.realmsById.get(60));
+  check(
+    '61. growth is not reported, because a wider window can manufacture it',
+    d.label === '= Kingdom' && d.lost === null,
+    d.label,
+  );
+}
+
+{
+  const bl = fresh();
+  bl.offer(iberiaAt({ castile: 15, leon: 10 }), IB);
+  bl.observing(IB);
+  const nibbled = iberiaAt({ castile: 14, leon: 10 });
+  check(
+    '62. ordinary churn is below the threshold and stays out of the table',
+    bl.delta(nibbled.realmsById.get(60)).label === '= Kingdom',
+    'one county of fifteen is not a divergence',
+  );
+}
+
+{
+  // The guard that makes the whole signal safe.
+  const bl = fresh();
+  bl.offer(iberiaAt({ castile: 15, leon: 10 }), IB);
+
+  bl.observing([...IB, 'world_europe_west_francia']); // widened
+  const wider = bl.delta(iberiaAt({ castile: 5, leon: 10 }).realmsById.get(60));
+
+  bl.observing(['world_europe_west_iberia']); // narrowed
+  const narrower = bl.delta(iberiaAt({ castile: 5, leon: 10 }).realmsById.get(60));
+
+  check(
+    '63. a widened window still reports the loss; a narrowed one suppresses it',
+    /down 10 of 15/.test(wider.label) && narrower.label === '= Kingdom' && narrower.lost === null,
+    `widened: ${wider.label} | narrowed: ${narrower.label}`,
+  );
+}
+
+{
+  // A baseline written before the sphere was recorded cannot verify the window.
+  // It reports the signal marked, rather than silently or as though certain.
+  const bl = fresh();
+  bl.offer(iberiaAt({ castile: 15, leon: 10 })); // no sphere argument
+  bl.observing(IB);
+  const d = bl.delta(iberiaAt({ castile: 5, leon: 10 }).realmsById.get(60));
+  check(
+    '64. an unverifiable comparison is flagged rather than hidden or trusted',
+    /down 10 of 15 counties\?/.test(d.label) && d.lost.verified === false,
+    d.label,
+  );
+}
+
+{
+  // Castile gone entirely: the case the realm table structurally cannot show,
+  // because a table of what exists has no row for what does not.
+  const bl = fresh();
+  bl.offer(iberiaAt({ castile: 15, leon: 10 }), IB);
+  bl.observing(IB);
+
+  const without = snapshot({
+    token: '65',
+    date: '1197.1.1',
+    totalDays: 437_000,
+    realms: [
+      { id: 61, ruler: 'Fernando III', title: 'Kingdom of León', rank: 'Kingdom', tierKey: 'kingdom', counties: 10, regions: IB },
+      { id: 62, ruler: 'Sancho I', title: 'Kingdom of Portugal', rank: 'Kingdom', tierKey: 'kingdom', counties: 8, regions: IB },
+    ],
+  });
+
+  const gone = bl.vanished(without);
+  check(
+    '65. a kingdom that no longer exists is reported, and trivia is not',
+    gone.total === 1 && gone.list[0].primaryTitle === 'Kingdom of Castile' && gone.verified,
+    `${gone.total} gone: ${gone.list.map((r) => r.primaryTitle).join(', ')} (the one-county Tudela is correctly ignored)`,
+  );
+
+  bl.observing(['world_europe_west_iberia']);
+  check(
+    '65b. and a narrowed window reports none, because absence is then ambiguous',
+    bl.vanished(without).list.length === 0,
+    'suppressed rather than guessed',
+  );
+}
+
+{
+  const bl = fresh();
+  bl.offer(iberiaAt({ castile: 15, leon: 10 }), IB);
+  bl.observing(IB);
+  check(
+    '66. nothing is claimed gone while everything is still there',
+    bl.vanished(iberiaAt({ castile: 15, leon: 10 })).total === 0,
+    'no false positives on an unchanged world',
+  );
+}
+
 try { fs.unlinkSync(tmp); } catch { /* already gone */ }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);

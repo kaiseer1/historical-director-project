@@ -23,13 +23,55 @@ import { isMidCampaignBaseline, nearestBookmark } from '../director/bookmarkTier
  * at every succession. Titles can be renamed by a player, which is an accepted
  * limitation: an unmatched realm yields no baseline, and no baseline must never
  * be read as licence to demote.
+ *
+ * ## Three axes, not one
+ *
+ * Rank was the only axis for a long time, and a live campaign showed what that
+ * missed. In 1197 Iberia the player's world had a Kingdom of Calatayud that
+ * never existed, an Aragon ruled by a King-Bishop, and no Castile at all - and
+ * the Director called it on track for thirty-seven consecutive audits. Rank is
+ * the one thing that had not moved: Leon was a kingdom at capture and a kingdom
+ * still, so `delta` returned "= Kingdom" and said nothing more.
+ *
+ * The footprint needed to catch it was already being captured and then thrown
+ * away. So there are now three signals:
+ *
+ *   - rank rose        gates adjust_title_tier, unchanged
+ *   - footprint fell   a realm still holding its title on a fraction of its land
+ *   - vanished         a realm in the baseline that is not in the world now
+ *
+ * Only the first gates anything. The other two are told to the model as
+ * evidence and nothing else, because "Castile has lost two thirds of its
+ * counties" is an argument for looking, exactly as a rank rise is.
+ *
+ * ## Why the sphere has to be recorded
+ *
+ * `countiesInSphere` is counted inside the sphere, so it is meaningless across a
+ * sphere that changed: widening the window from twelve regions to twenty adds
+ * counties to every realm straddling the old edge, and a naive comparison would
+ * report growth that never happened and absences that are only a narrower view.
+ * The sphere is therefore stored with the baseline, and the two derived signals
+ * are reported only when the captured sphere is a *subset* of the current one.
+ *
+ * That subset rule is what makes them safe rather than merely careful. Widening
+ * can only ever add counties and reveal realms - so under a wider window a loss
+ * is certainly a real loss, and an absence is certainly a real absence. Both
+ * degrade conservatively: a narrowed window suppresses them, and a baseline
+ * captured before the sphere was recorded reports them marked unverified rather
+ * than silently or not at all.
  */
 export class Baseline {
   /** @param {string} filePath */
   constructor(filePath) {
     this.filePath = filePath;
-    /** @type {{date: string, year: number, totalDays: number, realms: Record<string, {tierKey: string|null, countiesInSphere: number}>} | null} */
+    /** @type {{date: string, year: number, totalDays: number, sphere?: string[], realms: Record<string, {tierKey: string|null, countiesInSphere: number}>} | null} */
     this.data = null;
+    /**
+     * The sphere the *current* audit is looking through, set once per audit by
+     * `observing`. Not persisted: it describes this pass, not the reference.
+     * @type {string[]}
+     */
+    this.sphereNow = [];
     this.load();
   }
 
@@ -89,9 +131,10 @@ export class Baseline {
    * now describes a world that no longer exists.
    *
    * @param {any} snapshot
+   * @param {string[]} [sphere] the regions this snapshot was taken across
    * @returns {'captured'|'recaptured'|'kept'}
    */
-  offer(snapshot) {
+  offer(snapshot, sphere = []) {
     if (!snapshot || !Array.isArray(snapshot.realms)) return 'kept';
 
     const isEarlier = this.data !== null && snapshot.totalDays < this.data.totalDays;
@@ -111,6 +154,9 @@ export class Baseline {
       date: snapshot.date ?? '',
       year: snapshot.year ?? 0,
       totalDays: snapshot.totalDays ?? 0,
+      // Recorded so a later audit can tell whether its county counts are
+      // comparable with these ones at all. See the header.
+      sphere: normaliseSphere(sphere),
       realms,
     };
     this.save();
@@ -146,16 +192,135 @@ export class Baseline {
     // model acted on the first while only the second was true. The column is
     // read as evidence, so it has to say which one it is.
     if (prior.tierKey === now) {
+      // The case the whole footprint signal exists for. Leon was a kingdom at
+      // capture and is a kingdom still, and for thirty-seven audits that was the
+      // entire report - while Castile was being taken apart beside it.
+      const lost = this.footprintLoss(prior, realm);
       return {
-        label: this.midCampaign ? `= ${cap(now)} since load` : `= ${cap(now)}`,
+        label: withLoss(this.midCampaign ? `= ${cap(now)} since load` : `= ${cap(now)}`, lost),
         risen: false,
         known: true,
+        lost,
       };
     }
 
     const risen = RANK[now] > RANK[prior.tierKey];
-    return { label: `${cap(prior.tierKey)} -> ${cap(now)}`, risen, known: true };
+    return {
+      label: withLoss(`${cap(prior.tierKey)} -> ${cap(now)}`, this.footprintLoss(prior, realm)),
+      risen,
+      known: true,
+      lost: this.footprintLoss(prior, realm),
+    };
   }
+
+  /**
+   * Declare the sphere this audit is looking through.
+   *
+   * Called once per audit, before anything reads a delta. Without it the
+   * derived signals report themselves as unverified rather than guessing.
+   *
+   * @param {string[]} regions
+   */
+  observing(regions) {
+    this.sphereNow = normaliseSphere(regions);
+  }
+
+  /**
+   * Whether county counts and absences can be compared with the baseline's.
+   *
+   * 'sound'      the captured sphere is contained in the current one, so a loss
+   *              is a real loss and an absence is a real absence
+   * 'unverified' one of the two spheres is unknown - an older baseline.json, or
+   *              an audit that did not call `observing`. Signals are reported
+   *              but flagged, the same way a mid-campaign capture reports
+   *              "since load" rather than staying silent
+   * 'narrowed'   the window has shrunk, so both signals are suppressed
+   *
+   * @returns {'sound'|'unverified'|'narrowed'}
+   */
+  get comparability() {
+    const then = this.data?.sphere;
+    if (!Array.isArray(then) || then.length === 0) return 'unverified';
+    if (this.sphereNow.length === 0) return 'unverified';
+    const now = new Set(this.sphereNow);
+    return then.every((r) => now.has(r)) ? 'sound' : 'narrowed';
+  }
+
+  /**
+   * How much ground this realm has lost since the baseline, or null.
+   *
+   * Losses only. Widening the sphere can add counties to a realm that never
+   * gained any, so a reported gain may be an artefact of the window - but it can
+   * never hide one, so a loss under a window that only grew is certainly real.
+   * Small losses are dropped: a kingdom shedding one county of fourteen is
+   * ordinary medieval churn, and a table that says so on every row says nothing.
+   *
+   * @param {{tierKey: string|null, countiesInSphere: number}} prior
+   * @param {{countiesInSphere?: number}} realm
+   * @returns {{then: number, now: number, lost: number, share: number, verified: boolean} | null}
+   */
+  footprintLoss(prior, realm) {
+    if (this.comparability === 'narrowed') return null;
+    const then = prior?.countiesInSphere ?? 0;
+    const now = realm?.countiesInSphere ?? 0;
+    if (then <= 0 || now >= then) return null;
+
+    const lost = then - now;
+    const share = Math.round((lost / then) * 100);
+    if (lost < 2 || share < 25) return null;
+
+    return { then, now, lost, share, verified: this.comparability === 'sound' };
+  }
+
+  /**
+   * Realms the baseline recorded that are not in the world any more.
+   *
+   * Filtered rather than exhaustive. Nineteen years of a live campaign took 249
+   * realms down to 180 without anything historically interesting happening -
+   * small counties are absorbed constantly - so listing every absence would bury
+   * the one that matters. Only realms that were kingdom or empire tier, or held
+   * real ground, are worth the model's attention.
+   *
+   * @param {any} snapshot
+   * @param {number} [max]
+   * @returns {{list: Array<{primaryTitle: string, tierKey: string|null, countiesInSphere: number}>, total: number, verified: boolean}}
+   */
+  vanished(snapshot, max = 10) {
+    const none = { list: [], total: 0, verified: false };
+    if (!this.data || this.comparability === 'narrowed') return none;
+
+    const present = new Set(
+      (snapshot?.realms ?? []).map((r) => r.primaryTitle).filter(Boolean),
+    );
+
+    const gone = Object.entries(this.data.realms)
+      .filter(([title, v]) => title && !present.has(title))
+      .map(([primaryTitle, v]) => ({
+        primaryTitle,
+        tierKey: v.tierKey ?? null,
+        countiesInSphere: v.countiesInSphere ?? 0,
+      }))
+      .filter((r) => r.tierKey === 'kingdom' || r.tierKey === 'empire' || r.countiesInSphere >= 5)
+      .sort((a, b) => b.countiesInSphere - a.countiesInSphere);
+
+    return { list: gone.slice(0, max), total: gone.length, verified: this.comparability === 'sound' };
+  }
+}
+
+/** Sphere identity is the set of regions, not the order they were seeded in. */
+function normaliseSphere(regions) {
+  return Array.isArray(regions) ? [...new Set(regions.filter(Boolean).map(String))].sort() : [];
+}
+
+/**
+ * Fold a footprint loss into the rank column the prompt table prints.
+ * @param {string} label
+ * @param {{lost: number, then: number, share: number, verified: boolean} | null} loss
+ */
+function withLoss(label, loss) {
+  if (!loss) return label;
+  const mark = loss.verified ? '' : '?';
+  return `${label}, down ${loss.lost} of ${loss.then} counties${mark}`;
 }
 
 /** Ordering only; the wire values are lowercase tier keys. */
