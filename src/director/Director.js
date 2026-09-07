@@ -207,7 +207,14 @@ export class Director {
     const structured = await wikidata.evidenceFor(relevant.slice(0, 8), year);
 
     const dropped = documents.rejected ?? [];
-    this.log(`retrieved ${documents.length} articles, ${structured.length} realms with structured backing`);
+    // "0 realms with structured backing" is the same sentence whether the world
+    // has no attested history or Wikidata declined to answer, and for a whole
+    // live session it was the second while reading as the first. Name it.
+    const throttled = structured.throttled ?? 0;
+    const backing = throttled
+      ? `structured backing unavailable: Wikidata is rate-limiting us, retrying in ~${throttled}s`
+      : `${structured.length} realms with structured backing`;
+    this.log(`retrieved ${documents.length} articles, ${backing}`);
     if (dropped.length) this.log(`  discarded as wrong era: ${dropped.join(', ')}`);
 
     return {
