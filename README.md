@@ -26,6 +26,8 @@ This is v0.3 — a testing alpha. A complete vertical slice, not a finished mod.
 | Sphere of influence | Seeded from where the player rules — capital *and* realm footprint — then grown as far outward as you set it |
 | Knowledge layer | Wikipedia lead extracts, era-filtered + Wikidata reign intervals and dynasty spans |
 | Toolkit | `spawn_character`, `set_relations`, `grant_claim`, `adjust_title_tier`, `trigger_event` |
+| Macro events | `iberian_pressure` — one approval sets a regional process running; intensity bounded by live state |
+| Narrative cards | Every proposal carries in-world prose written from the lore and the live campaign together |
 | Momentum | `grant_claim` can also supply the means to press a claim — money, the resource the war costs, and a timed appetite for it. It never starts the war |
 | Governance | Encyclopedic sidebar, auto-pause, Approve / Decline, every verdict logged |
 | Settings | Audit cadence, sphere reach and ceiling, and the model — all changed from the sidebar, no restart |

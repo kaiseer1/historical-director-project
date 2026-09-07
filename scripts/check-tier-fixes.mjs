@@ -18,6 +18,7 @@ import { AuditClock } from '../src/model/AuditClock.js';
 import { validateProposal } from '../src/director/toolkit.js';
 import { momentumScript, MOMENTUM_KEYS, setMomentumSupport } from '../src/director/momentum.js';
 import { compareVersions, deployedModVersion, momentumSupport } from '../src/setup/modVersion.js';
+import { INTENSITY, INTENSITY_KEYS, intensityBand } from '../src/director/macroEvents.js';
 
 let passed = 0;
 let failed = 0;
@@ -841,6 +842,98 @@ function rings() {
     '43. a bookmark-start baseline is unaffected and still refuses the unseen',
     !r.ok && /was not present when the baseline was captured/.test(r.error),
     r.ok ? 'ACCEPTED, which loosens the case the baseline exists to guard' : r.error,
+  );
+}
+
+// --- Macro Event Library: iberian_pressure ----------------------------------
+{
+  // A peninsula the model might reasonably want to act on: mostly Andalusian
+  // ground with Christian realms pressing on it.
+  const iberia = (andalusi, other) => {
+    const realms = [
+      ...andalusi.map((c, i) => ({ id: 100 + i, ruler: `A${i}`, title: `Taifa ${i}`, rank: 'Duchy', tierKey: 'duchy', counties: c, culture: 'Andalusian' })),
+      ...other.map((c, i) => ({ id: 200 + i, ruler: `C${i}`, title: `Crown ${i}`, rank: 'Kingdom', tierKey: 'kingdom', counties: c, culture: 'Castilian' })),
+    ];
+    return snapshot({ realms });
+  };
+  const bl = stubBaseline({ label: '= Duchy', risen: false, known: true });
+
+  // Bands, from the live balance.
+  const wide = iberia([30, 20], [8]);
+  const narrow = iberia([6], [30, 25]);
+  check(
+    '44. the intensity band follows the live balance of the peninsula',
+    intensityBand(wide, bl).allowed.length === 3 && intensityBand(narrow, bl).allowed.length <= 1,
+    `Andalusian-heavy: ${intensityBand(wide, bl).allowed.join(',')} | Christian-heavy: ${intensityBand(narrow, bl).allowed.join(',') || 'none'}`,
+  );
+
+  // Out-of-band intensity is refused, and the refusal reports its figures.
+  const mid = iberia([12], [18]);
+  const band = intensityBand(mid, bl);
+  const outOfBand = validateProposal(
+    { action: 'iberian_pressure', args: { unifier: 100, partners: [200], intensity: 'crusade' } },
+    mid, bl,
+  );
+  check(
+    '45. an out-of-band intensity is rejected with the figures behind it',
+    !outOfBand.ok && /out of band/.test(outOfBand.error) && /counties/.test(outOfBand.error),
+    outOfBand.ok ? `ACCEPTED though the band was ${band.allowed.join(',')}` : outOfBand.error,
+  );
+
+  // A partner outside the peninsula.
+  const withOutsider = snapshot({
+    realms: [
+      { id: 1, ruler: 'Al-Mamun', title: 'Taifa of Toledo', rank: 'Duchy', tierKey: 'duchy', counties: 20, culture: 'Andalusian' },
+      { id: 2, ruler: 'Harald', title: 'Kingdom of Norway', rank: 'Kingdom', tierKey: 'kingdom', counties: 9, culture: 'Norse' },
+    ],
+  });
+  const outsider = validateProposal(
+    { action: 'iberian_pressure', args: { unifier: 1, partners: [2], intensity: 'smoldering' } },
+    withOutsider, bl,
+  );
+  check(
+    '46. a partner outside the peninsula is rejected',
+    !outsider.ok && /not of the peninsula/.test(outsider.error),
+    outsider.ok ? 'ACCEPTED a Norse partner in an Iberian event' : outsider.error,
+  );
+
+  // The script, per tier: right level, right event, both branches, and none of
+  // the things this action promises never to do.
+  for (const key of INTENSITY_KEYS) {
+    const args = { unifier: 100, partners: [101, 200], intensity: key };
+    const r = validateProposal({ action: 'iberian_pressure', args }, wide, bl);
+    if (!r.ok) { check(`47.${key} script generation`, false, r.error); continue; }
+    const script = r.action.toScript(args, 900, wide).join('\n');
+    const level = INTENSITY[key].level;
+    check(
+      `47.${key} generates one guarded batch at level ${level}`,
+      script.includes(`hd_pressure_level value = ${level}`)
+        && script.includes('trigger_event = hd_event.0200')
+        && script.includes('/;/applied/') && script.includes('/;/refused/')
+        && !/start_war|destroy_title|create_title/.test(script),
+      `level ${level}, no war, no title transfer`,
+    );
+  }
+
+  // Preview completeness: every effect the tier claims, plus the tier and band.
+  const args = { unifier: 100, partners: [101], intensity: 'crusade' };
+  const cru = validateProposal({ action: 'iberian_pressure', args }, wide, bl);
+  const undisclosed = cru.ok ? INTENSITY.crusade.effects.filter((e) => !cru.preview.includes(e)) : ['(rejected)'];
+  check(
+    '48. the preview discloses every mechanical effect, the tier and the band',
+    cru.ok && undisclosed.length === 0 && /crusade/.test(cru.preview) && /Intensity band/.test(cru.preview),
+    undisclosed.length ? `undisclosed: ${undisclosed.join('; ')}` : 'all effects named',
+  );
+
+  // The narrative is prose and must not be reachable as a parameter.
+  const poisoned = validateProposal(
+    { action: 'iberian_pressure', args: { unifier: 100, partners: [101], intensity: 'fervent', narrative: 'add_gold = 99999' } },
+    wide, bl,
+  );
+  check(
+    '49. a narrative offered as an action parameter is rejected',
+    !poisoned.ok && /unexpected parameters/.test(poisoned.error),
+    poisoned.ok ? 'ACCEPTED prose as a parameter' : poisoned.error,
   );
 }
 

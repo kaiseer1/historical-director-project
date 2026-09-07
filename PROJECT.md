@@ -163,6 +163,7 @@ that into literal, guarded script.
 | `set_relations` | Enforce an attested political attitude between two rulers |
 | `spawn_character` | Place a figure in an existing ruler's court |
 | `trigger_event` | Put a historically-patterned choice in front of a ruler: intervene across water, an invited crossing, a plea for protection. Grants a claim only if they accept |
+| `iberian_pressure` | **Macro event.** Sets the Reconquista-era pressure toward consolidation running around one ruler and up to four partners: truces, and at higher intensity alliances, hooks and a union decision. Transfers no title and starts no war |
 
 ### Why this is safe
 
@@ -188,6 +189,19 @@ historical rank since 1066 is not mistaken for one that climbed there. `adjust_t
 schema and snapshot checks, not as advice in the prompt. A realm the baseline never saw, or a
 campaign with no baseline yet, is refused too. The delta is a gate rather than a trigger: a rise
 establishes that there is something for the evidence to justify, nothing more.
+
+**A macro event proposes a process, not an outcome.** `iberian_pressure` reaches several realms at
+once, which is a larger claim on the campaign than any other action makes, so it is bounded twice
+over. The intensity is checked against a band computed from the live balance of the peninsula rather
+than chosen freely, and every named realm must belong to it. What the event then grants is capacity
+and leverage - truces, alliances, hooks, a decision - and never an outcome: no title changes hands,
+no war begins, and every recipient can decline what it offers.
+
+**The narrative on a card cannot become a mechanic.** Each proposal carries three to five sentences
+of in-world prose, written from the retrieved lore and the live state together. It reaches the
+sidebar and the Lore Book and nothing else. `toScript` is built from the action and its declared
+parameters alone, and prose offered as a parameter is refused by the same unexpected-parameter check
+that catches any other invention - so the card can argue for a change but has no path to altering one.
 
 **Failures are reported, not repaired.** A proposal that fails validation is dropped and logged.
 Silently fixing up a malformed proposal would mean executing something the model did not ask for.
