@@ -20,8 +20,9 @@ import { preflight, problemCount } from './setup/preflight.js';
 // Two similarly named things, kept apart on purpose: modVersion's resolves the
 // answer by reading the deployed descriptor, momentum's reports the answer the
 // toolkit is currently acting on.
-import { momentumSupport as resolveMomentumSupport } from './setup/modVersion.js';
+import { momentumSupport as resolveMomentumSupport, macroSupport as resolveMacroSupport } from './setup/modVersion.js';
 import { setMomentumSupport, momentumSupport as momentumSupportState } from './director/momentum.js';
+import { setMacroSupport, macroSupport as macroSupportState } from './director/macroEvents.js';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -468,6 +469,11 @@ function momentumState() {
   return { ok: m.ok, version: m.version, reason: m.reason, checked: m.checked };
 }
 
+function macroState() {
+  const m = macroSupportState();
+  return { ok: m.ok, version: m.version, reason: m.reason, checked: m.checked };
+}
+
 function publicState() {
   return {
     connected: state.connected,
@@ -495,6 +501,7 @@ function publicState() {
       auditEveryYears: cfg.director.auditEveryYears,
       sphereReach: cfg.director.sphereReach,
       momentum: momentumState(),
+      macro: macroState(),
       sphereMax: cfg.director.sphereMax,
       maxRealmsInPrompt: cfg.director.maxRealmsInPrompt,
       knowledge: cfg.knowledge.enabled,
@@ -577,14 +584,24 @@ setInterval(() => {
  * the applied record would still say ok.
  */
 function checkModCapabilities() {
-  const mod = resolveMomentumSupport(cfg.ck3UserFolder);
-  setMomentumSupport(mod);
-  if (mod.ok) {
-    log(`companion mod v${mod.version} deployed; momentum available`);
+  const mom = resolveMomentumSupport(cfg.ck3UserFolder);
+  setMomentumSupport(mom);
+
+  // Asked separately because the two features arrived in different mod
+  // versions, and a single "is the mod new enough" answer is exactly what let
+  // macro events ship ungated behind momentum's older threshold.
+  const macro = resolveMacroSupport(cfg.ck3UserFolder);
+  setMacroSupport(macro);
+
+  const version = mom.version ?? macro.version;
+  if (mom.ok && macro.ok) {
+    log(`companion mod v${version} deployed; momentum and macro events available`);
   } else {
-    log(`momentum unavailable: ${mod.reason}`);
+    if (version) log(`companion mod v${version} deployed`);
+    if (!mom.ok) log(`momentum unavailable: ${mom.reason}`);
+    if (!macro.ok) log(`macro events unavailable: ${macro.reason}`);
   }
-  return mod;
+  return { momentum: mom, macro };
 }
 
 /**

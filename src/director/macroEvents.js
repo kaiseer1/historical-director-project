@@ -44,6 +44,36 @@ import { resolveTagged } from '../bridge/ck3Script.js';
 /** CK3 event ids are numeric. Named suffixes do not load; see PROJECT.md. */
 export const IBERIAN_PRESSURE_EVENT = 'hd_event.0200';
 
+/**
+ * Whether the deployed companion mod can actually execute this.
+ *
+ * Everything below names content that lives in the mod rather than in composed
+ * script: three character modifiers, an event chain and a decision. A mod older
+ * than they are executes the batch, reports `applied ... ok`, and silently does
+ * none of it - which is the failure momentum already had a gate for and this
+ * did not, because the descriptor was not bumped when the content went in.
+ *
+ * Held here rather than looked up: `validate` runs deep inside the toolkit with
+ * no access to config and no business reading the filesystem. main.js resolves
+ * it at startup and again after any deploy.
+ *
+ * The default permits, for the same reason momentum's does: a unit test or a
+ * simulator run has no deployed mod to inspect, and defaulting to refuse would
+ * make macro events untestable without a CK3 install. Every path that can reach
+ * a game goes through main.js, which sets it unconditionally.
+ */
+let support = { ok: true, version: null, reason: '', checked: false };
+
+/** @param {{ok: boolean, version: string|null, reason: string}} next */
+export function setMacroSupport(next) {
+  support = { ...next, checked: true };
+}
+
+/** @returns {{ok: boolean, version: string|null, reason: string, checked: boolean}} */
+export function macroSupport() {
+  return support;
+}
+
 /** How many partners the event script has scopes for. */
 export const MAX_PARTNERS = 4;
 

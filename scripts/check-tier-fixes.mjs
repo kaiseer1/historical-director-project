@@ -17,7 +17,8 @@ import { Baseline } from '../src/model/Baseline.js';
 import { AuditClock } from '../src/model/AuditClock.js';
 import { validateProposal } from '../src/director/toolkit.js';
 import { momentumScript, MOMENTUM_KEYS, setMomentumSupport } from '../src/director/momentum.js';
-import { compareVersions, deployedModVersion, momentumSupport } from '../src/setup/modVersion.js';
+import { compareVersions, deployedModVersion, momentumSupport, macroSupport, MACRO_MIN_MOD } from '../src/setup/modVersion.js';
+import { setMacroSupport } from '../src/director/macroEvents.js';
 import { INTENSITY, INTENSITY_KEYS, intensityBand, hasRegionData } from '../src/director/macroEvents.js';
 
 let passed = 0;
@@ -1275,6 +1276,101 @@ function iberiaAt(counties) {
     '66. nothing is claimed gone while everything is still there',
     bl.vanished(iberiaAt({ castile: 15, leon: 10 })).total === 0,
     'no false positives on an unchanged world',
+  );
+}
+
+// --- the macro-event version gate ------------------------------------------
+// Momentum had this check and macro events did not. The Iberian pressure action
+// applies three character modifiers, fires an event chain and unlocks a
+// decision - all of it mod content - while the descriptor stayed at 0.4.2, the
+// same version that predates them. A mod deployed before those commits and one
+// deployed after reported the same version, so no check could tell them apart:
+// every validation passed, the preview promised an accord, and the batch
+// reported `applied ... ok` having done none of it.
+
+/** A CK3 user folder with a mod of the given version deployed into it. */
+function modAt(version) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hd-modver-'));
+  const inner = path.join(dir, 'mod', 'historical_director');
+  fs.mkdirSync(inner, { recursive: true });
+  fs.writeFileSync(path.join(inner, 'descriptor.mod'), 'version="' + version + '"\nname="Historical Director"\n', 'utf8');
+  return dir;
+}
+
+{
+  // The exact situation the live 1199 session was in: a mod new enough for
+  // momentum and too old for macro events, reporting "ok" to the only question
+  // anyone was asking it.
+  const dir = modAt('0.4.2');
+  const mom = momentumSupport(dir);
+  const macro = macroSupport(dir);
+  check(
+    'M1. a v0.4.2 mod supports momentum but not macro events',
+    mom.ok && !macro.ok && macro.version === '0.4.2' && /v0\.4\.3 or newer/.test(macro.reason),
+    'momentum ok, macro: ' + macro.reason,
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  const dir = modAt('0.4.3');
+  const macro = macroSupport(dir);
+  check(
+    'M2. the version that ships the content enables it',
+    macro.ok && macro.version === MACRO_MIN_MOD,
+    'v' + macro.version + ', macro events available',
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hd-nomod-macro-'));
+  const macro = macroSupport(dir);
+  check(
+    'M3. an undeployed mod refuses macro events and names the fix',
+    !macro.ok && macro.version === null && /deploy:mod/.test(macro.reason),
+    macro.reason,
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  // And the toolkit acts on it. A stale mod must refuse before any of the
+  // geography, locality or intensity reasoning runs, because none of that
+  // matters when the effects cannot land.
+  const snap = snapshot({
+    token: '60',
+    date: '1199.1.1',
+    totalDays: 437000,
+    realms: [
+      { id: 1, ruler: 'an-Nasir', title: 'Almohadi Caliphate', rank: 'Empire', tierKey: 'empire', culture: 'Andalusian' },
+      { id: 2, ruler: 'Alfonso', title: 'Kingdom of Leon', rank: 'Kingdom', tierKey: 'kingdom', culture: 'Castilian' },
+    ],
+  });
+
+  setMacroSupport({ ok: false, version: '0.4.2', reason: 'the deployed companion mod is v0.4.2 and the Iberian pressure event needs v0.4.3 or newer' });
+  const stale = validateProposal(
+    { action: 'iberian_pressure', args: { unifier: 1, partners: [2], intensity: 'smoldering' } },
+    snap,
+    null,
+  );
+  check(
+    'M4. the toolkit refuses iberian_pressure on a stale mod, before anything else',
+    !stale.ok && /cannot be executed/.test(stale.error) && /v0\.4\.3 or newer/.test(stale.error),
+    stale.ok ? 'ACCEPTED, so the preview promises an accord the mod cannot execute' : stale.error,
+  );
+
+  // Restored, so later cases and the rest of the suite see a capable mod.
+  setMacroSupport({ ok: true, version: '0.4.3', reason: '' });
+  const fresh = validateProposal(
+    { action: 'iberian_pressure', args: { unifier: 1, partners: [2], intensity: 'smoldering' } },
+    snap,
+    null,
+  );
+  check(
+    'M5. and stops refusing once the mod is current',
+    !(!fresh.ok && /cannot be executed/.test(fresh.error)),
+    fresh.ok ? 'permitted' : 'refused for a different, non-version reason: ' + fresh.error,
   );
 }
 
