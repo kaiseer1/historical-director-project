@@ -6,10 +6,15 @@ Where the Historical Director actually stands, as distinct from what it is desig
 Kept honest: a thing is "working" here only if it has been watched working, and everything that has
 not been is listed as such.
 
-**Status:** v0.4.2 alpha · branch `feat/public-release-prep`
-**Last live test:** 4 September 2026, a 1217 Banu Zahir campaign
-**Last harness test:** 4 September 2026 — 26 tier and gate cases, 8 region cases, and the full loop
-end to end against the built executable
+**Status:** v0.4.3 alpha · working branch `fix/wikidata-throttling`, unmerged and unpushed
+**Last live test:** 7 September 2026 — a 1178-1197 Emirate of Ghirnatah campaign, two hours
+unattended, roughly forty audits. Findings in section 3c.
+**Last harness test:** 8 September 2026 — 81 tier and gate cases, 8 region cases, 4 localisation
+cases, and the full loop end to end
+
+> **New to this project, or a fresh session?** Read **section 3c** first. It is the current state of
+> play: what the last live campaign proved, what was fixed because of it, and the one thing that was
+> deliberately left undone. Section 3e says which branch everything is on.
 
 ---
 
@@ -37,6 +42,13 @@ Everything in this section passes end to end against the simulator and the built
 none of it has been in front of CK3 yet. The simulator is a good proxy for the wire protocol and no
 proxy at all for the engine, which is the distinction section 4 was written to record.
 
+- **The footprint and disappearance signals** (section 3d). The arithmetic and the subset guard are
+  covered by ten cases, but no live campaign has yet produced a card that cites either one. The thing
+  to watch for is a false positive after a sphere change: the guard should mark an unverifiable
+  comparison with `?` rather than assert it, and a narrowed window should suppress it entirely.
+- **The Wikidata cooldown** (section 3c). Reproduced against a real 429 and fixed, but the fix is
+  about what happens over a two-hour session, and only a two-hour session will show whether the
+  cooldown is long enough to stop provoking the endpoint in the first place.
 - **The widened sphere.** Seeding from the realm's footprint rather than the capital alone rests on an
   `any_realm_county` probe the engine has never actually answered. The trigger and the
   `title_province` form are both lifted from vanilla usage, and the record is additive — an audit that
@@ -212,6 +224,124 @@ made the mod read as though it implemented a toolkit it had not implemented for
 months. Deleted. The mod is down to `hd_heartbeat` and `hd_mark_alive`, which is
 the property that let v0.3 widen the sphere with no mod change at all.
 
+## 3c. The 1197 Ghirnatah session, v0.4.3 — read this first if you are new here
+
+A two-hour unattended session on 7 September 2026: an Emirate of Ghirnatah campaign, 1178 to 1197,
+roughly forty audits at a one-in-game-year cadence with the sphere at reach 8. Nothing crashed. The
+pump died twice and the watchdog rebuilt it unaided (about twenty-eight minutes the first time), CK3
+rotated `debug.log` mid-session and the tailer rewound, settings were changed live from twelve
+regions to twenty with no restart, and one `grant_claim` with `reconquista` momentum was approved and
+confirmed applied.
+
+Three findings came out of it, and two are fixed.
+
+**1. A rate-limited Wikidata lookup was reading as "no evidence". Fixed.**
+
+Every one of the forty audits logged `0 realms with structured backing` — a flat zero with no
+variance, which is not what uneven coverage looks like. Wikidata was returning HTTP 429 with a
+`Retry-After` header, and `resolveEntity` caught every failure identically and wrote `null` into a
+cache that lives as long as the process. The first throttled burst therefore poisoned every dynasty
+for the rest of the session; nothing was ever retried, and the Director spent two hours being told
+that no structured evidence exists anywhere in the world.
+
+Transport failure and "no such entity" are now different things. A 429 sets a module-wide cooldown
+and is never cached; a genuine empty result still is, because most CK3 dynasties are invented and
+re-asking every audit is what provokes the throttling. `evidenceFor` stops early while throttled and
+carries a `throttled` flag, so the log says "Wikidata is rate-limiting us" instead of reporting an
+empty pass as though the world has no history in it.
+
+A second, smaller cause was real too: `dynastyFacts` only searched `"<name> dynasty"`, which resolves
+`Zirid` and misses every European house, because CK3 prints `de Barcelona` and `d'Ivrea` where
+Wikidata stores *House of Barcelona* and *Anscarids*. It now tries `House of <core>` on a genuine
+miss, guarded by the hit's own description so "Barcelona" resolves to the family and not the city.
+**Measured on the eight realms from the live snapshot: 0 of 8 before, 5 of 8 after.**
+
+**2. The Director could not see Iberia coming apart. Half fixed.**
+
+The 1197 map had a Kingdom of Calatayud that never existed, an Anointed Kingdom of Aragon under a
+King-Bishop, a Kingdom of Ipuskoa under an Angevin queen, and no Castile at all. The Director
+reported "this world is on track" thirty-seven times. Three distinct blind spots:
+
+- *New realms are structurally unactionable.* Calatayud and Aragon were not present at capture, so
+  `delta` returns "no baseline" and `adjust_title_tier` is refused. The log shows exactly this. The
+  gate fails closed by design, but it means any kingdom formed after the baseline is beyond rank
+  correction for the rest of the campaign. **Still open, and arguably correct as it stands.**
+- *Territorial collapse was invisible.* `offer()` was already storing `countiesInSphere` and `delta()`
+  only ever compared `tierKey`. **Fixed** — see section 3d.
+- *Disappearance was invisible.* Nothing iterated the baseline looking for realms absent from the
+  snapshot. **Fixed** — see section 3d.
+
+**3. The prompt is tuned too quiet. Not fixed, and deliberately so.**
+
+After the Seljuk over-eagerness in v0.2 the system prompt accumulated four separate instructions that
+all push toward proposing nothing: "divergence is expected and often fine", "what matters is the
+shape of the map, not the identity of the people on it", "prefer building over breaking", and
+"returning zero proposals is a good answer". Together they tell the model that an Angevin queen
+ruling a Basque kingdom is unremarkable. This is an over-correction and it wants pulling back, but
+that is the change most likely to swing the Director into demoting things again, so it belongs in its
+own reversible commit, tested against a live campaign, and it has not been made.
+
+**Also worth knowing.** A one-in-game-year cadence produced forty audits and one proposal. Each audit
+is a retrieval pass and one paid completion, and at that cadence the world barely moves between them,
+so "nothing proposed" is usually the *correct* answer being bought forty times over. The five-year
+default exists for this reason.
+
+**And a correction, recorded so nobody re-investigates it.** A localisation-markup bug was reported
+during this session and does not exist. `stripMarkup` in `src/bridge/protocol.js` already handles
+CK3's `ONCLICK:`/`TOOLTIP:`/`L;` wrappers and `parseLine` already applies it to every field; the raw
+log lines look alarming and the parsed records are clean. The diagnosis came from reading the log
+without checking the parse step.
+
+---
+
+## 3d. Three axes instead of one, v0.4.3
+
+The baseline measured rank and nothing else. It now measures three things, of which only the first
+gates anything:
+
+| Signal | What it means | Gates |
+|---|---|---|
+| rank rose | `Kingdom -> Empire` since capture | `adjust_title_tier`, unchanged |
+| footprint fell | `= Kingdom, down 10 of 15 counties` | nothing — evidence only |
+| vanished | a realm in the baseline absent from the world now | nothing — evidence only |
+
+Disappearance is a prompt section rather than a table column, because a table of what exists has no
+row for what does not — which is precisely why the most important fact about Iberia had nowhere to
+appear.
+
+**The correctness problem this had to solve first.** `countiesInSphere` is counted inside the sphere,
+and the live session widened its sphere from twelve regions to twenty mid-campaign. A naive
+comparison across that would have invented losses and absences wholesale. So the sphere is stored
+with the baseline, and both derived signals are reported only when the captured sphere is a *subset*
+of the current one. Widening can only add counties and reveal realms, so under a wider window a loss
+is certainly a real loss and an absence is certainly a real absence. A narrowed window suppresses
+both. A `baseline.json` written before the sphere was recorded reports them marked `?` rather than
+silently or as though certain — the same choice as `= Empire since load`.
+
+Gains are never reported at all: a wider window can manufacture a gain but cannot hide a loss, so
+only the direction that stays sound is used. Losses under two counties or 25% are dropped, because a
+kingdom shedding one county of fifteen is ordinary churn.
+
+`Baseline.observing(regions)` must be called once per audit before anything reads a delta.
+`Director.audit` does this; any new caller must too, or the signals report themselves unverified.
+
+---
+
+## 3e. Branch state, as of 8 September 2026
+
+| Branch | Contains | Pushed | Merged |
+|---|---|---|---|
+| `main` | everything through the public-release pass | yes | — |
+| `feat/public-release-prep` | README v0.4.2, alpha warning, attribution, privacy sweep | yes | yes, into `main` |
+| `fix/wikidata-throttling` | findings 1 and 2 above — the Wikidata fix and the two new baseline signals | **no** | **no** |
+
+`fix/wikidata-throttling` is two commits ahead of `main` and has not been reviewed, merged or pushed.
+Everything in it is orchestrator-side: **no mod change, no redeploy, no CK3 restart** — restarting
+`npm start` is enough to pick it up.
+
+Checks at the head of that branch: 81 tier and gate cases, 8 region cases, 4 localisation cases, and
+the full loop end to end. All green.
+
 ## 4. How it got here
 
 Ordered, because each fix was only visible once the one before it was out of the way.
@@ -261,15 +391,26 @@ player and the model both read.
 ## 5. Open items
 
 **Next**
-- Run v0.3 against the live 1217 save: the widened sphere and the mid-campaign gate are the two things
-  it was built for and neither has faced the engine
-- Run `verify-toolkit.mjs` against a throwaway save to close the two unobserved toolkit actions
+- Review and merge `fix/wikidata-throttling` (section 3e), then run a live campaign and watch for a
+  card that cites lost ground or a vanished realm — that is what the last two commits were for
+- Tune the prompt back from silence (section 3c, finding 3). Its own commit, and the one most likely
+  to reintroduce the demotion-happy behaviour of v0.2, so it wants a live campaign either side of it
+- Run `verify-toolkit.mjs` against a throwaway save to close `set_relations`, the last toolkit action
+  nobody has watched take effect
+- Check Alfonso VIII's character view in the 1197 save for the reconquista modifier. The approved
+  `grant_claim` logged `applied`, which proves the batch ran and not that
+  `add_character_modifier` found its definition — those fail silently
 
 **Known and unfixed**
 - The sidebar shows stale state when the orchestrator restarts rather than saying "disconnected"
 - The execution pump does not survive a save load; the yearly watchdog rebuilds it, but the console
   command is faster
 - The baseline keys on primary title, so a renamed realm reads as `no baseline`
+- A realm formed after the baseline was captured can never be rank-corrected: `delta` returns
+  `no baseline` and `adjust_title_tier` refuses. The 1197 campaign had two such kingdoms. Failing
+  closed is right; whether the bookmark tables should be allowed to speak for them is open
+- A one-in-game-year audit cadence buys forty completions to hear "nothing proposed" forty times.
+  The default of five exists for that reason and the sidebar does not say so
 - The bookmark tables hold three dates. A campaign at 1300 is measured against 1178
 - `d_kermanshah` is in both `world_middle_east_arabia` and `world_persia` in the base game. One duchy
   in 530; the county-level guard absorbs it, and `check-regions.mjs` allows it by name rather than by

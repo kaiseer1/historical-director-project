@@ -242,13 +242,22 @@ function renderWorld() {
   // momentum is the one thing that needs them to agree. Said here rather than
   // left to a dropped-proposal line, because the player should know a whole
   // class of proposal is unavailable before wondering why it never appears.
-  const m = s.config?.momentum;
-  if (m && !m.ok) {
+  // Each feature that lives in mod content rather than in composed script gets
+  // its own line, because they arrived in different mod versions and a single
+  // "the mod is old" message cannot say which of them is actually withheld.
+  const gated = [
+    [s.config?.momentum, 'Momentum is unavailable.',
+      'Claims can still be granted; only the effects that make a ruler able and willing to press one are withheld.'],
+    [s.config?.macro, 'The Iberian pressure event is unavailable.',
+      'Its modifiers, its event chain and the union decision all live in the companion mod, so the whole action is withheld rather than partly applied.'],
+  ];
+  for (const [feature, headline, consequence] of gated) {
+    if (!feature || feature.ok) continue;
     const warn = el('div', 'warn');
-    warn.appendChild(el('strong', null, 'Momentum is unavailable.'));
-    warn.appendChild(el('p', null, m.reason));
+    warn.appendChild(el('strong', null, headline));
+    warn.appendChild(el('p', null, feature.reason));
     warn.appendChild(el('p', null,
-      'Claims can still be granted; only the effects that make a ruler able and willing to press one are withheld. The Director will not propose them, so nothing here promises an effect your game cannot execute.'));
+      `${consequence} The Director will not propose it, so nothing here promises an effect your game cannot execute.`));
     host.appendChild(warn);
   }
 
@@ -261,9 +270,14 @@ function renderWorld() {
     ['Sphere of influence', s.sphere?.labels?.join('; ') || 'not yet computed'],
     ['Sphere setting', `reach ${s.config?.sphereReach ?? '?'}, up to ${s.config?.sphereMax ?? '?'} regions`],
     ['Realms observed', String(s.realmCount ?? 0)],
-    ['Companion mod', s.config?.momentum?.version
-      ? `v${s.config.momentum.version}${s.config.momentum.ok ? '' : ' (too old for momentum)'}`
-      : s.config?.momentum?.checked ? 'not deployed' : 'unverified'],
+    ['Companion mod', (() => {
+      const mom = s.config?.momentum;
+      const macro = s.config?.macro;
+      const version = mom?.version ?? macro?.version;
+      if (!version) return mom?.checked ? 'not deployed' : 'unverified';
+      const stale = [!mom?.ok && 'momentum', !macro?.ok && 'macro events'].filter(Boolean);
+      return stale.length ? `v${version} (too old for ${stale.join(' and ')})` : `v${version}`;
+    })()],
     ['Model', s.config?.model ?? '-'],
     ['Audit cadence', `every ${s.config?.auditEveryYears ?? '?'} in-game years`],
     ['Knowledge layer', s.config?.knowledge ? 'Wikipedia + Wikidata' : 'disabled'],

@@ -30,6 +30,18 @@ import { MOD_NAME } from './deployMod.js';
 export const MOMENTUM_MIN_MOD = '0.4.0';
 
 /**
+ * The mod version that first defined the Iberian pressure modifiers, the
+ * hd_event.0200 chain and the union decision.
+ *
+ * Bumped in the same commit that added them, which is the discipline this whole
+ * module depends on and which the macro-event work missed: the content went in
+ * while the descriptor stayed at 0.4.2, so a mod deployed *before* those
+ * commits and one deployed after reported the same version and no check could
+ * tell them apart.
+ */
+export const MACRO_MIN_MOD = '0.4.3';
+
+/**
  * Compare two dotted version strings numerically.
  * @returns {number} negative when a < b, 0 when equal, positive when a > b
  */
@@ -61,31 +73,55 @@ export function deployedModVersion(ck3UserFolder) {
 }
 
 /**
- * Whether the deployed mod can execute momentum, and if not, what to tell the
- * player. The reason is written to be shown verbatim in the sidebar and in a
+ * Whether the deployed mod is new enough for one feature, and if not, what to
+ * tell the player. The reason is shown verbatim in the sidebar and in a
  * dropped-proposal line, so it names the fix rather than only the fault.
  *
+ * Written once and called twice on purpose. Momentum had this check and macro
+ * events did not, which is exactly how the gap reopened; a second hand-written
+ * copy of the same logic is how it would reopen again.
+ *
  * @param {string} ck3UserFolder
+ * @param {string} minVersion
+ * @param {string} feature what the player asked for, named in the refusal
+ * @param {string} defines what the newer mod provides, so the reason explains itself
  * @returns {{ok: boolean, version: string|null, reason: string}}
  */
-export function momentumSupport(ck3UserFolder) {
+function featureSupport(ck3UserFolder, minVersion, feature, defines) {
   const version = deployedModVersion(ck3UserFolder);
 
   if (!version) {
     return {
       ok: false,
       version: null,
-      reason: 'the companion mod is not deployed, so momentum cannot be executed. Run: npm run deploy:mod',
+      reason: `the companion mod is not deployed, so ${feature} cannot be executed. Run: npm run deploy:mod`,
     };
   }
 
-  if (compareVersions(version, MOMENTUM_MIN_MOD) < 0) {
+  if (compareVersions(version, minVersion) < 0) {
     return {
       ok: false,
       version,
-      reason: `the deployed companion mod is v${version} and momentum needs v${MOMENTUM_MIN_MOD} or newer, which is where the modifiers it applies are defined. Run: npm run deploy:mod, then restart CK3`,
+      reason: `the deployed companion mod is v${version} and ${feature} needs v${minVersion} or newer, which is where ${defines} are defined. Run: npm run deploy:mod, then restart CK3`,
     };
   }
 
   return { ok: true, version, reason: '' };
+}
+
+/** @param {string} ck3UserFolder */
+export function momentumSupport(ck3UserFolder) {
+  return featureSupport(ck3UserFolder, MOMENTUM_MIN_MOD, 'momentum', 'the modifiers it applies');
+}
+
+/**
+ * @param {string} ck3UserFolder
+ */
+export function macroSupport(ck3UserFolder) {
+  return featureSupport(
+    ck3UserFolder,
+    MACRO_MIN_MOD,
+    'the Iberian pressure event',
+    'its modifiers, its event chain and the union decision',
+  );
 }

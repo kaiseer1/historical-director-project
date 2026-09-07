@@ -17,7 +17,7 @@
 import { resolveTagged } from '../bridge/ck3Script.js';
 import { expectationFor } from './bookmarkTiers.js';
 import { MOMENTUM, MOMENTUM_KEYS, isMomentum, momentumOf, momentumScript, momentumPreview, momentumSupport } from './momentum.js';
-import { INTENSITY, INTENSITY_KEYS, MAX_PARTNERS, intensityBand, iberianPressureScript, inRegion, hasRegionData, IBERIA_REGION } from './macroEvents.js';
+import { INTENSITY, INTENSITY_KEYS, MAX_PARTNERS, intensityBand, iberianPressureScript, inRegion, hasRegionData, IBERIA_REGION, macroSupport } from './macroEvents.js';
 
 /** Characters CK3 script treats structurally. Never let these through. */
 const UNSAFE = /["'{}\[\]$\\=#\r\n\t]/g;
@@ -692,6 +692,14 @@ export const TOOLKIT = {
     },
 
     validate(a, state, baseline) {
+      // First, because it dominates every other reason. Unlike momentum, which
+      // is an optional amplification of an otherwise-executable claim, this
+      // whole action lives in mod content: three modifiers, an event chain and
+      // a decision. A mod that predates them runs the batch, reports
+      // `applied ... ok`, and does none of it.
+      const mod = macroSupport();
+      if (!mod.ok) return `iberian_pressure cannot be executed: ${mod.reason}`;
+
       const unifier = safeInt(a.unifier);
       if (unifier === null || !state.realmsById.has(unifier)) {
         return `unifier ${a.unifier} is not a ruler in the snapshot`;

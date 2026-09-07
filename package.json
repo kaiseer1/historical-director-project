@@ -1,6 +1,6 @@
 {
   "name": "historical-director",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "A human-in-the-loop LLM framework for historically-grounded gameplay in Crusader Kings III",
   "type": "module",
   "main": "src/main.js",
