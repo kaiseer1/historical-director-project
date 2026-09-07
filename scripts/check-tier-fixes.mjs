@@ -1007,6 +1007,124 @@ function rings() {
   );
 }
 
+// --- 54-59. spawn_character: a person with somewhere to go -------------------
+// The Director proposed "Restore the Premyslid heir to the Imperial court" and
+// reasoned about a re-established Kingdom of Bohemia. What it executed was a
+// courtier with a generated dynasty, no claim, and - because create_character
+// has no `sex` key - a gender the engine picked for itself. Four things the
+// card promised that the script did not do.
+
+/** A Kaiser, a Bohemian king, and a ruler out on the rim. */
+function bohemia() {
+  return snapshot({
+    token: '54',
+    date: '1257.6.1',
+    totalDays: 458_800,
+    realms: [
+      { id: 30, ruler: 'Kaiser Heinrich VII', title: 'Holy Roman Empire', rank: 'Empire', tierKey: 'empire', ring: 'home' },
+      { id: 31, ruler: 'Vaclav', title: 'Kingdom of Bohemia', rank: 'Kingdom', tierKey: 'kingdom', ring: 'near' },
+      { id: 32, ruler: 'Batu', title: 'the Golden Horde', rank: 'Empire', tierKey: 'empire', ring: 'distant' },
+    ],
+  });
+}
+
+{
+  const snap = bohemia();
+  const args = { name: 'Ottokar', sex: 'male', age: 30, host: 30 };
+  const r = validateProposal({ action: 'spawn_character', args }, snap, risenBaseline);
+  check(
+    '54. a bare spawn says on the card that it creates a courtier and nothing more',
+    r.ok && /no claim and no title/.test(r.preview),
+    r.ok ? r.preview : r.error,
+  );
+}
+
+{
+  const snap = bohemia();
+  const args = { name: 'Ottokar', sex: 'male', age: 30, host: 30 };
+  const r = validateProposal({ action: 'spawn_character', args }, snap, risenBaseline);
+  const script = r.ok ? r.action.toScript(args, 54, snap).join('\n') : '';
+  check(
+    '55. the script emits gender, which CK3 reads, and never sex, which it ignores',
+    script.includes('gender = male') && !/\bsex = /.test(script),
+    script.includes('gender = male') ? 'gender = male' : script,
+  );
+}
+
+{
+  const snap = bohemia();
+  const args = { name: 'Ottokar', sex: 'male', age: 30, host: 30, house: 31, claim: 31 };
+  const r = validateProposal({ action: 'spawn_character', args }, snap, risenBaseline);
+  const script = r.ok ? r.action.toScript(args, 56, snap).join('\n') : '';
+  check(
+    '56. an endowed spawn carries the house and the claim, and guards both',
+    r.ok
+      && script.includes('dynasty_house = scope:hd_kin.house')
+      && !script.includes('dynasty = generate')
+      && /after_creation = \{\s*\n\s*add_pressed_claim = scope:hd_claim\.primary_title/.test(script)
+      && script.includes('exists = scope:hd_kin.house')
+      && script.includes('exists = scope:hd_claim.primary_title'),
+    r.ok ? 'house from scope:hd_kin, claim inside after_creation, both guarded' : r.error,
+  );
+  check(
+    '56b. and the card names the title, its tier, and who may press it',
+    r.ok && /kingdom-tier title Kingdom of Bohemia/.test(r.preview) && /No war starts/.test(r.preview),
+    r.ok ? r.preview : r.error,
+  );
+}
+
+{
+  // The endowments are optional, so a proposal that names one the snapshot does
+  // not contain must be refused rather than executed as the bare spawn it
+  // would otherwise silently become.
+  const snap = bohemia();
+  const badHouse = validateProposal(
+    { action: 'spawn_character', args: { name: 'Ottokar', sex: 'male', age: 30, host: 30, house: 999 } },
+    snap, risenBaseline,
+  );
+  const badClaim = validateProposal(
+    { action: 'spawn_character', args: { name: 'Ottokar', sex: 'male', age: 30, host: 30, claim: 999 } },
+    snap, risenBaseline,
+  );
+  check(
+    '57. an unresolvable house or claim is refused by name, not quietly dropped',
+    !badHouse.ok && /house 999 is not a ruler/.test(badHouse.error)
+      && !badClaim.ok && /claim 999 is not a ruler/.test(badClaim.error),
+    badHouse.ok ? 'ACCEPTED, which would spawn a courtier the card called a claimant' : badHouse.error,
+  );
+}
+
+{
+  // A claim is an act against the title's holder, so it takes grant_claim's
+  // locality rule. A bare spawn does not.
+  const snap = bohemia();
+  const rim = validateProposal(
+    { action: 'spawn_character', args: { name: 'Ottokar', sex: 'male', age: 30, host: 32, claim: 32 } },
+    snap, risenBaseline,
+  );
+  const bare = validateProposal(
+    { action: 'spawn_character', args: { name: 'Ottokar', sex: 'male', age: 30, host: 32 } },
+    snap, risenBaseline,
+  );
+  check(
+    '58. a claim across the rim is refused by locality; a bare spawn there is not',
+    !rim.ok && /at least one party/.test(rim.error) && bare.ok,
+    rim.ok ? 'ACCEPTED a claimant war arranged on the far edge of the sphere' : rim.error,
+  );
+}
+
+{
+  // The invariant every action shares.
+  const snap = bohemia();
+  const args = { name: 'Ottokar', sex: 'male', age: 30, host: 30, claim: 31 };
+  const script = validateProposal({ action: 'spawn_character', args }, snap, risenBaseline)
+    .action.toScript(args, 59, snap).join('\n');
+  check(
+    '59. and it still reports both outcomes',
+    script.includes('HD:/;/applied/;/59/;/spawn_character') && script.includes('HD:/;/refused/;/59/;/spawn_character'),
+  );
+}
+
 try { fs.unlinkSync(tmp); } catch { /* already gone */ }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);

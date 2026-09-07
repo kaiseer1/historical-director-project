@@ -59,8 +59,11 @@ proxy at all for the engine, which is the distinction section 4 was written to r
   against it), whether the AI visibly acts on `ai_war_chance = 50` inside a reasonable span, and
   whether thirty years at that strength is far too much. The last of those is a tuning question that
   only a live campaign can answer.
-- **`spawn_character` and `set_relations`.** Only the two map-shaping actions have been seen to land.
-  `scripts/verify-toolkit.mjs` stages either one directly; it needs someone with a throwaway save.
+- **`set_relations`.** `spawn_character` has now been seen to land in a live 1257 campaign, leaving
+  this as the one action nobody has watched take effect. `scripts/verify-toolkit.mjs` stages it
+  directly; it needs someone with a throwaway save.
+- **The endowed spawn.** The house and the pressed claim are composed and guarded, and both use
+  vanilla syntax, but nobody has yet opened a court and seen the claimant standing in it.
 - **The three narrative events** (`hd_event.0100`–`0102`). Each logs when it fires so a blocked one is
   distinguishable from a working one, but none has been seen reaching a ruler.
 - **The startup event firing unassisted.** Every live session so far has armed the pump by hand with

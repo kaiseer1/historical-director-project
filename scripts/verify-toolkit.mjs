@@ -61,6 +61,10 @@ const tags = {
   actor: num('actor'),
   target: num('target'),
   host: num('host'),
+  // spawn_character's two optional endowments. Both are tags like the rest, so
+  // adding them here is enough to put them in the fake state below.
+  house: num('house'),
+  claim: num('claim'),
 };
 
 /** @param {string} name */
@@ -88,6 +92,10 @@ const ARGS = {
     sex: arg('sex', 'male'),
     age: Number(arg('age', '30')),
     host: tags.host ?? tags.actor,
+    // Omitted rather than passed as null, because the action distinguishes
+    // "not asked for" from "asked for and unresolvable" and refuses the second.
+    ...(tags.house === null ? {} : { house: tags.house }),
+    ...(tags.claim === null ? {} : { claim: tags.claim }),
   }),
   set_relations: () => ({ actor: tags.actor, target: tags.target, value: Number(arg('value', '-50')) }),
   grant_claim: () => ({ actor: tags.actor, target: tags.target }),
@@ -134,6 +142,8 @@ function usage() {
   console.log(`  node scripts/verify-toolkit.mjs ${CONSENT} --action <name> [args]`);
   console.log('');
   console.log('  spawn_character    --host <tag> [--name X --sex male|female --age N]');
+  console.log('                     [--house <tag>]  born into that ruler\'s dynastic house');
+  console.log('                     [--claim <tag>]  pressed claim on that ruler\'s primary title');
   console.log('  set_relations      --actor <tag> --target <tag> [--value -100..100]');
   console.log('  grant_claim        --actor <tag> --target <tag>');
   console.log('  adjust_title_tier  --actor <tag> [--target_tier kingdom|duchy|county] [--tier <observed>]');

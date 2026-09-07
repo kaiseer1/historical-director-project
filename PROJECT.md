@@ -161,7 +161,7 @@ that into literal, guarded script.
 | `adjust_title_tier` | Destroy a ruler's primary title, dropping the realm exactly one rank. Names its target tier; releases the vassals below an empire or kingdom |
 | `grant_claim` | Give one ruler a pressed claim on another's primary title |
 | `set_relations` | Enforce an attested political attitude between two rulers |
-| `spawn_character` | Place a figure in an existing ruler's court |
+| `spawn_character` | Place a figure in an existing ruler's court. Optionally born into a named ruler's dynastic house, and optionally carrying a pressed claim on a named ruler's primary title, which the host may press in a claimant war or leave alone |
 | `trigger_event` | Put a historically-patterned choice in front of a ruler: intervene across water, an invited crossing, a plea for protection. Grants a claim only if they accept |
 | `iberian_pressure` | **Macro event.** Sets the Reconquista-era pressure toward consolidation running around one ruler and up to four partners: truces, and at higher intensity alliances, hooks and a union decision. Transfers no title and starts no war |
 
@@ -372,6 +372,13 @@ characters defined in history files. The game reports a ruler's id as 34497 and
 `exists = character:34497` is false. This is why VOTC addresses characters through saved scopes, and
 why this project now addresses them through snapshot-assigned tags.
 
+**9. `create_character` silently ignores keys it does not recognise.** The spawn action wrote
+`sex = male`. CK3's key is `gender`; `sex` is not a `create_character` field at all, so the line was
+dropped without a script-log entry and every figure the Director created took the engine's own
+default chance instead. A card proposing a male claimant could produce a woman, and nothing anywhere
+said so. This is behaviour 6 one layer up: the batch reported `applied`, because the batch *had*
+applied — it simply had not applied what the card described.
+
 ### Two lessons that are not about CK3
 
 **An action whose intent lives only in prose is not constrained.** `adjust_title_tier` took a
@@ -444,9 +451,15 @@ making the system say what it did, what it is about to do, and — when it refus
 - **The narrative events have not been observed firing.** `hd_event.0100`-`0102` are written against
   vanilla and RICE syntax rather than invented, and each logs when it fires so a blocked one is
   distinguishable from a working one, but nobody has watched one reach a ruler.
-- **`spawn_character` and `set_relations` have not yet been confirmed in-game.** Only the two
-  map-shaping actions have been observed to land. `scripts/verify-toolkit.mjs` stages either one
-  directly so this can be closed; it needs someone with a live campaign to run it.
+- **`set_relations` has not yet been confirmed in-game.** `spawn_character` has now been watched
+  landing a courtier in a live 1257 campaign, which leaves `set_relations` as the one action nobody
+  has seen take effect. `scripts/verify-toolkit.mjs` stages it directly so this can be closed; it
+  needs someone with a live campaign to run it.
+- **The endowed spawn is composed but unwatched.** `dynasty_house = scope:<x>.house` and
+  `add_pressed_claim` inside `after_creation` are both vanilla usage, and the guards refuse the whole
+  batch rather than degrade when either scope is missing — but nobody has yet opened a court and seen
+  a claimant standing in it with the claim attached. Until someone does, the strongest thing that can
+  be said is that the script is well-formed.
 - **`adjust_title_tier` moves one rank at a time.** `destroy_title` drops a ruler onto whatever they
   hold underneath and cannot be aimed further, so a two-rank correction takes two audits. Allowing a
   single multi-step proposal would let the stated intent and the actual effect disagree.
@@ -463,8 +476,9 @@ making the system say what it did, what it is about to do, and — when it refus
 **Near term**
 - Sidebar should detect a dropped connection instead of showing stale state
 - Confirm the startup event fires unassisted
-- Run `scripts/verify-toolkit.mjs` against a live campaign to confirm `spawn_character` and
-  `set_relations` — the harness exists, the observation does not
+- Run `scripts/verify-toolkit.mjs` against a live campaign to confirm `set_relations`, and to
+  watch an endowed `spawn_character` put a claimant in a court — the harness exists, the observation
+  does not
 
 **Medium term**
 - Local Wikipedia dumps with a vector store, replacing the live API path

@@ -298,9 +298,10 @@ HD_HOME=/tmp/hd-test npm start
 
 ## 5a. Verifying the toolkit
 
-Three of the five actions have been watched working in a live campaign. `spawn_character` and
-`set_relations` have not, which is the largest remaining gap between what the design claims and what
-anyone has actually seen. Closing it needs a real game, so there is a harness.
+Four of the six actions have been watched working in a live campaign. `set_relations` has not, and
+neither has an endowed `spawn_character` — one carrying a house and a pressed claim rather than being
+a bare courtier. That is the largest remaining gap between what the design claims and what anyone has
+actually seen. Closing it needs a real game, so there is a harness.
 
 **This bypasses the approval gate.** It stages an action straight into the run file with no model and
 no proposal. Use a throwaway save.
@@ -328,7 +329,8 @@ What to look for on screen, per action:
 | Action | Command | Confirm in game |
 |---|---|---|
 | `set_relations` | `--action set_relations --actor <tag> --target <tag> --value -60` | Open the actor's character view; the target should carry a new opinion modifier |
-| `spawn_character` | `--action spawn_character --host <tag> --name Testus --sex male --age 30` | Open the host ruler's court; a new courtier named Testus, aged 30, their culture and faith |
+| `spawn_character` | `--action spawn_character --host <tag> --name Testus --sex male --age 30` | Open the host ruler's court; a new courtier named Testus, aged 30, **male**, their culture and faith |
+| `spawn_character`, endowed | `--action spawn_character --host <tag> --name Testus --house <tag> --claim <tag>` | Same court, but Testus carries the house's name, and his character view's Claims section shows a pressed claim on the claim tag's primary title. The host should gain a claimant casus belli against its holder |
 | `grant_claim` | `--action grant_claim --actor <tag> --target <tag>` | The actor's character view, Claims section: a pressed claim on the target's primary title |
 | `adjust_title_tier` | `--action adjust_title_tier --actor <tag> --target_tier duchy --tier kingdom` | The realm drops one rank on the map; its kingdom-tier vassals may go independent |
 | `trigger_event` | `--action trigger_event --actor <tag> --event hd_event.0100` | The recipient gets a choice; accepting grants a pressed claim on a neighbour |

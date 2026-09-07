@@ -83,6 +83,19 @@ function guarded(limitBody, effects, action, token) {
 const RANK = { barony: 0, county: 1, duchy: 2, kingdom: 3, empire: 4 };
 
 /**
+ * Was an optional parameter supplied at all?
+ *
+ * Distinguishes "omitted" from "supplied and unresolvable". The first is a bare
+ * spawn, which is legal; the second names something the snapshot does not
+ * contain, which is refused rather than dropped.
+ *
+ * @param {unknown} v
+ */
+function given(v) {
+  return v !== undefined && v !== null && v !== '';
+}
+
+/**
  * Resolve a character id from a proposal into the tag the game can find.
  * @param {any} state
  * @param {number|null} id
@@ -218,7 +231,7 @@ export const TOOLKIT = {
   spawn_character: {
     signature: 'spawn_character',
     description:
-      'Introduce a historical figure who ought to exist at this date but does not, placing them in the court of a ruler from the snapshot.',
+      "Introduce a historical figure who ought to exist at this date but does not, placing them in the court of a ruler from the snapshot. On its own this creates a courtier and nothing else: no title, no claim, no path to power. The two optional parameters are what give the person somewhere to go. `house` makes them a real member of an existing dynasty rather than a stranger wearing its name, and `claim` gives them a pressed claim on a named ruler's primary title, which their host may press for them in a claimant war. It never starts a war and never transfers a title. Propose a bare spawn only where the figure matters as a person - a scholar, a hostage, a bride - and use `claim` wherever the point is a disputed succession.",
     parameters: {
       type: 'object',
       properties: {
@@ -226,6 +239,16 @@ export const TOOLKIT = {
         sex: { type: 'string', enum: ['male', 'female'] },
         age: { type: 'integer', minimum: 0, maximum: 90 },
         host: { type: 'integer', description: 'Character id from the snapshot whose court they join' },
+        house: {
+          type: 'integer',
+          description:
+            'Optional. Character id from the snapshot whose dynastic house this figure is born into. Use it whenever the record names them as an heir or kinsman of an existing line. Without it they are given a freshly invented dynasty, and a Premyslid heir who is not a Premyslid is a name and nothing more.',
+        },
+        claim: {
+          type: 'integer',
+          description:
+            'Optional. Character id from the snapshot whose primary title this figure holds a pressed claim on. This is the path to power: the host gains a claimant casus belli they may act on or ignore. Name the ruler who currently holds the disputed title, not the one who wants it.',
+        },
       },
       required: ['name', 'sex', 'age', 'host'],
       additionalProperties: false,
@@ -237,32 +260,98 @@ export const TOOLKIT = {
       if (age === null || age < 0 || age > 90) return 'age must be between 0 and 90';
       const host = safeInt(a.host);
       if (host === null || !state.realmsById.has(host)) return `host ${a.host} is not a ruler in the snapshot`;
+
+      // Both endowments are refused by name rather than quietly dropped. A
+      // proposal whose whole point is a claimant, executed as a bare courtier
+      // because the claim id did not resolve, is the sidebar describing one
+      // intervention while the game receives another - the same class of error
+      // as repairing a malformed proposal instead of rejecting it.
+      if (given(a.house)) {
+        const house = safeInt(a.house);
+        if (house === null || !state.realmsById.has(house)) return `house ${a.house} is not a ruler in the snapshot`;
+      }
+      if (given(a.claim)) {
+        const claim = safeInt(a.claim);
+        if (claim === null || !state.realmsById.has(claim)) return `claim ${a.claim} is not a ruler in the snapshot`;
+        // A pressed claim is an act against whoever holds the title, so it
+        // takes the same locality rule grant_claim does. A bare spawn does not:
+        // a courtier with no claim pushes nobody into anybody.
+        return requireLocality(state, [host, claim], 'spawn_character');
+      }
       return null;
     },
     preview(a, state) {
       const host = state.realmsById.get(safeInt(a.host));
-      return `Create ${safeString(a.name)}, ${safeString(a.sex)}, aged ${safeInt(a.age)}, in the court of ${host?.ruler ?? a.host}.`;
+      const kin = given(a.house) ? state.realmsById.get(safeInt(a.house)) : null;
+      const claim = given(a.claim) ? state.realmsById.get(safeInt(a.claim)) : null;
+
+      const of = kin?.house ? ` of ${kin.house}` : kin ? `, kin of ${kin.ruler ?? a.house}` : '';
+      let out = `Create ${safeString(a.name)}${of}, ${safeString(a.sex)}, aged ${safeInt(a.age)}, in the court of ${host?.ruler ?? a.host}.`;
+
+      // The sentence the old preview never wrote. A card that says only "create
+      // a character" and leaves the reader to infer a restored kingdom from the
+      // reasoning above it is promising something the script does not do.
+      if (claim) {
+        const tier = claim.tierKey ? `the ${claim.tierKey}-tier title ` : '';
+        out += ` They carry a pressed claim on ${tier}${claim.primaryTitle ?? 'the target primary title'},`
+          + ` held by ${claim.ruler ?? a.claim}, which ${host?.ruler ?? 'their host'} may press in a claimant war or leave alone.`
+          + ' No war starts and no title changes hands.';
+        out += distanceNote(state, [safeInt(a.host), safeInt(a.claim)]);
+      } else {
+        out += ' They hold no claim and no title: this puts a person in a court and nothing more.';
+      }
+      return out;
     },
-    toScript: (a, token, state) => [
-      ...resolveTagged(tagOf(state, safeInt(a.host)), 'hd_host'),
-      ...guarded(
-      'exists = scope:hd_host',
-      [
-        'scope:hd_host = {',
-        '\tcreate_character = {',
-        '\t\temployer = scope:hd_host',
-        `\t\tname = "${safeString(a.name)}"`,
-        `\t\tsex = ${safeString(a.sex)}`,
-        `\t\tage = ${safeInt(a.age)}`,
-        '\t\tculture = scope:hd_host.culture',
-        '\t\tfaith = scope:hd_host.faith',
-        '\t\tdynasty = generate',
-        '\t}',
-        '}',
-      ],
-      'spawn_character',
-      token,
-    )],
+    toScript: (a, token, state) => {
+      const kinTag = given(a.house) ? tagOf(state, safeInt(a.house)) : null;
+      const claimTag = given(a.claim) ? tagOf(state, safeInt(a.claim)) : null;
+
+      // Each endowment adds its own precondition, so a claim whose holder has
+      // no primary title refuses the whole batch rather than landing a courtier
+      // the preview described as a claimant.
+      const limits = ['exists = scope:hd_host'];
+      if (kinTag !== null) limits.push('exists = scope:hd_kin.house');
+      if (claimTag !== null) limits.push('exists = scope:hd_claim.primary_title');
+
+      return [
+        ...resolveTagged(tagOf(state, safeInt(a.host)), 'hd_host'),
+        ...(kinTag === null ? [] : resolveTagged(kinTag, 'hd_kin')),
+        ...(claimTag === null ? [] : resolveTagged(claimTag, 'hd_claim')),
+        ...guarded(
+          limits.join('\n\t\t'),
+          [
+            'scope:hd_host = {',
+            '\tcreate_character = {',
+            '\t\temployer = scope:hd_host',
+            `\t\tname = "${safeString(a.name)}"`,
+            // `gender`, not `sex`. CK3's create_character has no `sex` key, so
+            // the line this replaces was silently ignored and every figure the
+            // Director spawned came out at the engine's own default chance: a
+            // proposal for a male claimant could produce a woman, and nothing
+            // in the log would say so. The parameter keeps its name because
+            // that is what the model fills in; only the emitted key was wrong.
+            `\t\tgender = ${safeString(a.sex)}`,
+            `\t\tage = ${safeInt(a.age)}`,
+            '\t\tculture = scope:hd_host.culture',
+            '\t\tfaith = scope:hd_host.faith',
+            kinTag === null ? '\t\tdynasty = generate' : '\t\tdynasty_house = scope:hd_kin.house',
+            // after_creation is the only place the claim can be attached. The
+            // created character is not reachable from outside the block that
+            // made it, and after_creation runs in its scope while the batch's
+            // saved scopes are still in reach.
+            ...(claimTag === null ? [] : [
+              '\t\tafter_creation = {',
+              '\t\t\tadd_pressed_claim = scope:hd_claim.primary_title',
+              '\t\t}',
+            ]),
+            '\t}',
+            '}',
+          ],
+          'spawn_character',
+          token,
+        ),
+      ];
+    },
   },
 
   set_relations: {
