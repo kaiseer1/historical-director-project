@@ -431,6 +431,10 @@ function approve({ id }) {
   loreBook.record({
     date: p.date, year: p.year, verdict: 'approved', action: p.action,
     summary: p.preview, rationale: p.divergence, sources: p.sources,
+    // The card's prose, kept with the verdict. It is the readable half of what
+    // the player was looking at when they decided, and the ledger is thin
+    // without it.
+    narrative: p.narrative ?? '',
   });
 
   state.proposals = state.proposals.filter((x) => x.id !== id);
@@ -447,6 +451,7 @@ function decline({ id }) {
   loreBook.record({
     date: p.date, year: p.year, verdict: 'declined', action: p.action,
     summary: p.preview, rationale: p.divergence, sources: p.sources,
+    narrative: p.narrative ?? '',
   });
 
   state.proposals = state.proposals.filter((x) => x.id !== id);

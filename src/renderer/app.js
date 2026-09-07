@@ -163,6 +163,12 @@ function renderProposal(p) {
   }
   card.appendChild(meta);
 
+  // The card's own voice, above the analysis. It argues for why the moment
+  // matters; everything below it is the case and the mechanics.
+  if (p.narrative) {
+    card.appendChild(el('p', 'narrative', p.narrative));
+  }
+
   section(card, 'The divergence', p.divergence);
   section(card, 'Historical context', p.historical_context);
   section(card, 'If approved', p.consequences);

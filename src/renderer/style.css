@@ -99,6 +99,12 @@ main { padding: 22px 28px 48px; max-width: 760px; }
   text-transform: uppercase; letter-spacing: .06em;
 }
 .meta .conf { color: var(--accent); }
+
+.narrative {
+  font-size: 15.5px; line-height: 1.7; color: var(--ink);
+  border-left: 2px solid var(--accent); padding: 2px 0 2px 16px;
+  margin: 0 0 20px;
+}
 .meta .destructive {
   color: var(--decline); font-weight: 700;
   border: 1px solid var(--decline); border-radius: 2px; padding: 1px 6px;

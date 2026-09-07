@@ -6,6 +6,70 @@ import * as wikipedia from '../knowledge/wikipedia.js';
 import * as wikidata from '../knowledge/wikidata.js';
 
 /**
+ * The two halves a narrative card is written from.
+ *
+ * Half history: the lore actually retrieved for this audit, named so the model
+ * writes from what is in front of it rather than from memory. Half reality: a
+ * few sentences of live state, phrased as sentences rather than as table rows,
+ * because the card is prose and a model handed a table tends to write one.
+ *
+ * The point of composing this separately from the evidence block is that the
+ * evidence block is for judgement and this is for voice. The same facts, put
+ * where the model is being asked to do a different thing with them.
+ *
+ * @param {any} snapshot
+ * @param {any} evidence
+ * @param {any} [baseline]
+ * @returns {string}
+ */
+function requestSection(snapshot, evidence, baseline) {
+  const realms = snapshot.byRelevance ?? snapshot.byFootprint ?? [];
+  const player = snapshot.player;
+
+  /** @type {string[]} */
+  const live = [];
+  if (player) {
+    live.push(`The player is ${player.ruler} of ${player.primaryTitle}, ${player.culture}/${player.faith}, holding ${player.countiesInSphere} counties in the sphere.`);
+  }
+
+  const top = realms.slice(0, 5);
+  if (top.length) {
+    live.push(`The largest realms in view are ${top.map((r) => `${r.primaryTitle} under ${r.ruler} (${r.countiesInSphere} counties, ${r.culture})`).join('; ')}.`);
+  }
+
+  // Splits and consolidations are the shape of the moment, and the single most
+  // useful live sentence a card can be given.
+  const byCulture = new Map();
+  for (const r of realms) {
+    const k = r.culture || 'unknown';
+    byCulture.set(k, (byCulture.get(k) ?? 0) + 1);
+  }
+  const fragmented = [...byCulture.entries()].filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]);
+  if (fragmented.length) {
+    live.push(`Cultures split across several realms: ${fragmented.slice(0, 4).map(([c, n]) => `${c} across ${n}`).join(', ')}.`);
+  }
+
+  if (baseline?.captured) {
+    const risen = realms.filter((r) => baseline.delta(r)?.risen);
+    live.push(risen.length
+      ? `Risen in rank since the baseline: ${risen.map((r) => r.primaryTitle).join(', ')}.`
+      : 'No realm in view has risen in rank since the baseline was taken.');
+  }
+
+  const lore = (evidence.documents ?? []).slice(0, 4).map((d) => `- ${d.title}: ${String(d.extract).slice(0, 320)}`);
+  const structured = (evidence.structured ?? []).slice(0, 4).map((e) => `- ${e.realm}: ${e.holders ? e.holders.join('; ') : e.note}`);
+
+  return [
+    'HALF HISTORY - what the record says, as retrieved for this audit:',
+    ...(lore.length ? lore : ['- (no narrative sources retrieved for this audit)']),
+    ...(structured.length ? ['', 'Attested figures and spans:', ...structured] : []),
+    '',
+    'HALF REALITY - what is actually true in this campaign right now:',
+    ...live.map((l) => `- ${l}`),
+  ].join('\n');
+}
+
+/**
  * The Historical Director.
  *
  * Runs one audit: take the world as the mod reported it, retrieve what the
@@ -86,6 +150,10 @@ export class Director {
         historical_context: String(p.historical_context ?? '').slice(0, 2000),
         consequences: String(p.consequences ?? '').slice(0, 800),
         confidence: p.confidence ?? 'unstated',
+        // Prose for the card and the ledger. It never reaches the run file:
+        // toScript is built from the action and its parameters alone, so the
+        // narrative can argue for a change but cannot alter one.
+        narrative: String(p.narrative ?? '').slice(0, 900),
         // Surfaced in the sidebar so an action that dissolves a realm does not
         // look like one that nudges an opinion.
         destructive: Boolean(check.action.destructive),
@@ -192,6 +260,10 @@ export class Director {
       'Available actions:',
       JSON.stringify(toolSchemas(), null, 1),
       '',
+      'THE NARRATIVE CARD.',
+      'Each proposal carries a narrative: three to five sentences that read as if written from inside the world, weaving the retrieved history together with what is actually happening in this campaign. The Request section below gives you both halves - lore on one side, live state on the other - and the card is where they meet. Name the rulers and realms the snapshot actually reports; do not invent a third thing that is in neither half.',
+      'It is prose for the player to read before deciding, and nothing more. No mechanical effect is drawn from it: what an approval does is fixed by the action you named and its parameters, and the narrative cannot add to that, subtract from it, or change it. Write it as an argument for why this moment matters, not as a description of what the button does - the preview already says that, precisely.',
+      '',
       'Respond with JSON only, in this shape:',
       '{',
       '  "assessment": "one paragraph on how closely this world tracks the record",',
@@ -202,7 +274,8 @@ export class Director {
       '    "divergence": "what the game shows versus what the record says",',
       '    "historical_context": "encyclopedic, neutral, Wikipedia-style explanation for the player",',
       '    "consequences": "what changes in the campaign if this is approved",',
-      '    "confidence": "high | medium | low"',
+      '    "confidence": "high | medium | low",',
+      '    "narrative": "3-5 sentences of in-world prose for the sidebar card, half history and half this campaign - see the Request section"',
       '  }]',
       '}',
       `Return at most ${this.maxProposals} proposals.`,
@@ -237,6 +310,9 @@ export class Director {
       ...(briefing ? ['## The record at the nearest bookmark', briefing, ''] : []),
       '## Retrieved historical evidence',
       evidenceBlock,
+      '',
+      '## Request: the two halves of the card',
+      requestSection(snapshot, evidence, this.baseline),
       '',
       '## Ledger of prior judgements',
       this.loreBook.asPromptContext(),
