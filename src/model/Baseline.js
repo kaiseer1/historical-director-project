@@ -247,6 +247,35 @@ export class Baseline {
   }
 
   /**
+   * Whether a realm's absence from the baseline can be read as "it did not
+   * exist then", rather than "we were not looking at the ground it stands on".
+   *
+   * The converse of `comparability`, and not interchangeable with it. That one
+   * asks whether a realm the baseline *held* can be missed now, and is safe
+   * when the window only grew. This asks whether a realm the baseline *lacks*
+   * was genuinely absent, and is safe only when the window has not grown: a
+   * sphere widened from twelve regions to twenty reveals realms that were there
+   * all along, and reading those as newly formed would be inventing a history
+   * for every one of them.
+   *
+   * A live campaign made the difference concrete. A 1178 baseline, a sphere
+   * since widened to twenty regions, and a Grand Emirate of Sahara absent from
+   * the baseline - which the gate refused as "not present when the baseline was
+   * captured". That baseline recorded no sphere at all and the Sahara may never
+   * have been in the window; the realm could have stood there for the whole
+   * campaign. The refusal was right and its stated reason was a guess.
+   *
+   * @returns {boolean}
+   */
+  get absenceMeansNew() {
+    const then = this.data?.sphere;
+    if (!Array.isArray(then) || then.length === 0) return false;
+    if (this.sphereNow.length === 0) return false;
+    const thenSet = new Set(then);
+    return this.sphereNow.every((r) => thenSet.has(r));
+  }
+
+  /**
    * How much ground this realm has lost since the baseline, or null.
    *
    * Losses only. Widening the sphere can add counties to a realm that never

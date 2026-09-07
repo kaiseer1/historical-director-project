@@ -277,7 +277,11 @@ console.log('\nHistorical Director — tier-demotion fixes\n');
   const r = validateProposal({ action: 'adjust_title_tier', args: { actor: 30, target_tier: 'duchy' } }, later, b);
   check(
     '11. a realm absent from the baseline is rejected',
-    !r.ok && /no reference for its rank/.test(r.error),
+    // Either phrasing is correct here and which one appears depends on whether
+    // the baseline recorded a sphere. What this case guards is that an absent
+    // realm is refused for want of a reference, not which of the two reasons
+    // the Director gives for having none.
+    !r.ok && /no reference for its rank|No reference, so no claim/.test(r.error),
     r.ok ? 'ACCEPTED without any reference, which is the gap' : r.error,
   );
 }
@@ -836,13 +840,21 @@ function rings() {
 {
   // A bookmark-start baseline is unchanged: it saw the whole opening map of its
   // sphere, so absence from it is still meaningful and still refuses.
+  //
+  // "Of its sphere" is the load-bearing half, and this case used not to
+  // establish it. A baseline that recorded no sphere cannot support the claim
+  // that a realm was absent rather than unwatched, so the window is now stated
+  // and unchanged, which is the condition under which the guard actually holds.
   const seen = { id: 24, ruler: 'Philippe', title: 'Kingdom of France', rank: 'Kingdom', tierKey: 'kingdom' };
-  const b = baselineAt(1066, seen);
+  const b = fresh();
+  b.offer(snapshot({ date: '1066.1.1', totalDays: 1066 * 365, realms: [seen] }), ['world_europe_west_francia']);
+  b.observing(['world_europe_west_francia']);
+
   const unseen = { id: 25, ruler: 'Bohemond', title: 'Principality of Antioch', rank: 'Empire', tierKey: 'empire' };
   const now = snapshot({ token: '52', date: '1100.1.1', totalDays: 401000, realms: [unseen] });
   const r = validateProposal({ action: 'adjust_title_tier', args: { actor: 25, target_tier: 'kingdom' } }, now, b);
   check(
-    '43. a bookmark-start baseline is unaffected and still refuses the unseen',
+    '43. a bookmark-start baseline with a stated, unchanged window still refuses the unseen',
     !r.ok && /was not present when the baseline was captured/.test(r.error),
     r.ok ? 'ACCEPTED, which loosens the case the baseline exists to guard' : r.error,
   );
@@ -1459,6 +1471,135 @@ const heard = (findings) => findings.find((f) => f.label === 'the mod has writte
     f.ok ? 'found across the boundary' : 'MISSED, so the chunk overlap is wrong',
   );
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// --- absence, and whether the Director was looking ---------------------------
+// A realm missing from the baseline means "it did not exist then" only if the
+// window has not grown since. A live 1178 campaign whose sphere had widened to
+// twenty regions refused a Grand Emirate of Sahara as "not present when the
+// baseline was captured" - from a baseline that recorded no sphere at all, over
+// ground it may never have been watching. The refusal was right; its stated
+// reason was a guess.
+
+const IBERIA = 'world_europe_west_iberia';
+const SAHARA = 'world_africa_sahara';
+
+/** A bookmark-start baseline, captured across a named sphere. */
+function baselineAcross(year, sphere, realms) {
+  const b = fresh();
+  b.offer(snapshot({ date: year + '.1.1', totalDays: year * 365, realms }), sphere);
+  return b;
+}
+
+{
+  // Captured across Iberia only, now looking at Iberia and the Sahara. A realm
+  // in view but absent from the baseline could have stood there all along.
+  const b = baselineAcross(1178, [IBERIA], [
+    { id: 1, ruler: 'Muhammad', title: 'Emirate of Ghirnatah', rank: 'Kingdom', tierKey: 'kingdom' },
+  ]);
+  b.observing([IBERIA, SAHARA]);
+
+  const now = snapshot({
+    token: '70',
+    date: '1199.1.1',
+    totalDays: 437637,
+    realms: [{ id: 2, ruler: 'A Sheikh', title: 'Grand Emirate of Sahara', rank: 'Kingdom', tierKey: 'kingdom' }],
+  });
+  const r = validateProposal({ action: 'adjust_title_tier', args: { actor: 2, target_tier: 'duchy' } }, now, b);
+  check(
+    'S1. a widened sphere stops the gate claiming a realm is new',
+    !r.ok && /the sphere has widened/.test(r.error) && !/was not present when the baseline was captured/.test(r.error),
+    r.ok ? 'ACCEPTED, which is not the fix' : r.error,
+  );
+  check(
+    'S1b. and absenceMeansNew says why',
+    b.absenceMeansNew === false,
+    'the window grew, so absence proves nothing',
+  );
+}
+
+{
+  // Same shape, but the window has not grown. Here absence really does mean the
+  // realm was not there, and the firm refusal is correct.
+  const b = baselineAcross(1178, [IBERIA, SAHARA], [
+    { id: 1, ruler: 'Muhammad', title: 'Emirate of Ghirnatah', rank: 'Kingdom', tierKey: 'kingdom' },
+  ]);
+  b.observing([IBERIA, SAHARA]);
+
+  const now = snapshot({
+    token: '71',
+    date: '1199.1.1',
+    totalDays: 437637,
+    realms: [{ id: 2, ruler: 'A Sheikh', title: 'Grand Emirate of Sahara', rank: 'Kingdom', tierKey: 'kingdom' }],
+  });
+  const r = validateProposal({ action: 'adjust_title_tier', args: { actor: 2, target_tier: 'duchy' } }, now, b);
+  check(
+    'S2. an unchanged window keeps the firm "was not present" refusal',
+    !r.ok && /was not present when the baseline was captured/.test(r.error) && b.absenceMeansNew === true,
+    r.error,
+  );
+}
+
+{
+  // The live case: a baseline recording no sphere at all, which is every
+  // baseline.json written before the sphere was stored. It cannot support the
+  // claim either.
+  const b = fresh();
+  b.offer(snapshot({
+    date: '1178.1.1',
+    totalDays: 1178 * 365,
+    realms: [{ id: 1, ruler: 'Muhammad', title: 'Emirate of Ghirnatah', rank: 'Kingdom', tierKey: 'kingdom' }],
+  }));
+  b.observing([IBERIA, SAHARA]);
+  check(
+    'S3. a baseline that recorded no sphere cannot claim newness either',
+    b.absenceMeansNew === false,
+    'unverified rather than assumed, the same choice as "= Empire since load"',
+  );
+}
+
+{
+  // And the door this opens is narrow. An empire the 1178 roster does not carry,
+  // absent from a baseline whose window has grown, now reaches the tables - and
+  // the tables permit it, which is the whole point of having them.
+  const b = baselineAcross(1178, [IBERIA], [
+    { id: 1, ruler: 'Muhammad', title: 'Emirate of Ghirnatah', rank: 'Kingdom', tierKey: 'kingdom' },
+  ]);
+  b.observing([IBERIA, SAHARA]);
+
+  const now = snapshot({
+    token: '72',
+    date: '1199.1.1',
+    totalDays: 437637,
+    realms: [{ id: 3, ruler: 'Someone', title: 'the invented Empire', rank: 'Empire', tierKey: 'empire' }],
+  });
+  const r = validateProposal({ action: 'adjust_title_tier', args: { actor: 3, target_tier: 'kingdom' } }, now, b);
+  check(
+    'S4. an unlisted empire now reaches the bookmark tables and is permitted',
+    r.ok,
+    r.ok ? r.preview : 'REJECTED: ' + r.error,
+  );
+}
+
+{
+  // But the Holy Roman Empire is still safe, because the tables name it.
+  const b = baselineAcross(1178, [IBERIA], [
+    { id: 1, ruler: 'Muhammad', title: 'Emirate of Ghirnatah', rank: 'Kingdom', tierKey: 'kingdom' },
+  ]);
+  b.observing([IBERIA, SAHARA]);
+
+  const now = snapshot({
+    token: '73',
+    date: '1199.1.1',
+    totalDays: 437637,
+    realms: [{ id: 4, ruler: 'Heinrich', title: 'Holy Roman Empire', rank: 'Empire', tierKey: 'empire' }],
+  });
+  const r = validateProposal({ action: 'adjust_title_tier', args: { actor: 4, target_tier: 'kingdom' } }, now, b);
+  check(
+    'S5. and the Holy Roman Empire is still refused by name',
+    !r.ok && /nothing to bring down/.test(r.error),
+    r.ok ? 'ACCEPTED, which reopens failure B through the new door' : r.error,
+  );
 }
 
 try { fs.unlinkSync(tmp); } catch { /* already gone */ }

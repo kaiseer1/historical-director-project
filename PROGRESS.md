@@ -265,7 +265,7 @@ reported "this world is on track" thirty-seven times. Three distinct blind spots
 - *New realms are structurally unactionable.* Calatayud and Aragon were not present at capture, so
   `delta` returns "no baseline" and `adjust_title_tier` is refused. The log shows exactly this. The
   gate fails closed by design, but it means any kingdom formed after the baseline is beyond rank
-  correction for the rest of the campaign. **Still open, and arguably correct as it stands.**
+  correction for the rest of the campaign. **Partly addressed — see section 3f.**
 - *Territorial collapse was invisible.* `offer()` was already storing `countiesInSphere` and `delta()`
   only ever compared `tierKey`. **Fixed** — see section 3d.
 - *Disappearance was invisible.* Nothing iterated the baseline looking for realms absent from the
@@ -324,6 +324,44 @@ kingdom shedding one county of fifteen is ordinary churn.
 
 `Baseline.observing(regions)` must be called once per audit before anything reads a delta.
 `Director.audit` does this; any new caller must too, or the signals report themselves unverified.
+
+---
+
+## 3f. Absence, and whether anyone was looking, v0.4.3
+
+A 1199 session refused a Grand Emirate of Sahara as *"not present when the baseline was captured"*.
+The refusal was right and its stated reason was a guess: that baseline was taken across a narrower
+sphere and recorded no sphere at all, so the realm may have stood there for the whole campaign with
+nobody watching.
+
+`Baseline.absenceMeansNew` is the converse of `comparability` and the two are not interchangeable.
+`comparability` asks whether a realm the baseline *held* can be missed now, and is safe when the
+window only grew. This asks whether a realm the baseline *lacks* was genuinely absent, and is safe
+only when the window has **not** grown — a sphere widened from twelve regions to twenty reveals
+realms that were there all along, and reading those as newly formed would invent a history for each
+of them.
+
+The gate now splits three ways rather than two:
+
+| Baseline | Realm | Verdict |
+|---|---|---|
+| any | present in it | unchanged — the rank rules as before |
+| bookmark-start, window not grown | absent | refused firmly: it really was not there |
+| window grown, or no sphere recorded | absent | the baseline is silent; the bookmark tables decide |
+
+That third row is the change, and it is narrow. The tables refuse unless there is a real claim, so a
+kingdom-tier realm still yields nothing; what it opens is an empire the bookmark roster does not
+carry, which is exactly the divergence worth raising. The shipped map is untouched, because those
+realms are *in* the baseline and take the first row — the Holy Roman Empire is still refused by name.
+
+Every `baseline.json` written before the sphere was recorded takes the third row, which includes the
+one in this campaign. That is the honest reading, not a degradation: those files never knew what they
+were looking at.
+
+Two existing cases changed with it, and both were asserting more than their data supported. One
+tested the wording of a refusal rather than the refusal; the other opened with "it saw the whole
+opening map of *its sphere*" over a baseline that had recorded no sphere at all. The premise is now
+stated in the test.
 
 ---
 

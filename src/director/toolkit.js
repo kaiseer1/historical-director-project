@@ -557,12 +557,22 @@ export const TOOLKIT = {
       // What the baseline's silence proves depends entirely on when it was
       // taken, and for a long time this code did not ask.
       if (!baseline.midCampaign) {
-        // Captured at a bookmark, so it is the map as shipped and its silence
-        // is informative both ways.
-        if (!d.known) {
+        // Captured at a bookmark, so for the ground it was actually watching it
+        // is the map as shipped and its silence is informative both ways.
+        if (d.known) {
+          return `${name} has stood at ${observed} tier since the campaign began (${d.label}); that is the map as it started, not drift`;
+        }
+        // Absent from it. That means "did not exist then" only if the window has
+        // not grown since; a sphere widened from twelve regions to twenty
+        // reveals realms that stood there all along, and calling those new would
+        // be inventing a history for each of them.
+        if (baseline.absenceMeansNew) {
           return `${name} was not present when the baseline was captured, so the Director has no reference for its rank and cannot say it has risen`;
         }
-        return `${name} has stood at ${observed} tier since the campaign began (${d.label}); that is the map as it started, not drift`;
+        // Otherwise the baseline cannot speak about this realm at all, for the
+        // same reason a mid-campaign one cannot: no evidence either way. Fall
+        // through to the tables, which have their own guards and refuse unless
+        // there is a real claim to make.
       }
 
       // Mid-campaign, where the baseline is not a claim about the world at all.
@@ -594,10 +604,16 @@ export const TOOLKIT = {
       // saw this realm and it has not moved, or the baseline never saw it at
       // all. Neither is evidence, but reporting the second as the first would
       // be the same class of error the mid-campaign work exists to correct.
+      // Three ways to arrive here, and the reason has to say which. Reporting a
+      // widened window as a mid-campaign capture, or an unseen realm as an
+      // unchanged one, would be the same class of error this whole path was
+      // written to correct.
       const silence = d.known
-        ? `${name} is unchanged since the baseline`
-        : `the baseline never saw ${name}, because it was captured from a different part of the map`;
-      return `${silence}, and that baseline was taken at ${baseline.capturedYear} - mid-campaign - so it cannot tell drift from the map as loaded. The ${expectation.bookmark} tables carry no expectation for this realm either. No reference, so no claim`;
+        ? `${name} is unchanged since a baseline taken at ${baseline.capturedYear}, mid-campaign, so it cannot tell drift from the map as loaded`
+        : baseline.midCampaign
+          ? `the baseline never saw ${name}, because it was captured at ${baseline.capturedYear} from a different part of the map`
+          : `the baseline does not carry ${name}, but the sphere has widened since it was captured, so that may mean the Director was not watching this ground rather than that the realm is new`;
+      return `${silence}. The ${expectation.bookmark} tables carry no expectation for this realm either. No reference, so no claim`;
     },
     preview(a, state) {
       const actor = state.realmsById.get(safeInt(a.actor));
