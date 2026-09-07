@@ -230,3 +230,222 @@ hd_event.0102 = {
 		}
 	}
 }
+
+# --- Macro Event Library v1 -------------------------------------------------
+#
+# hd_event.0200 is the first macro event: one approval that sets a process
+# running across several realms instead of doing one thing to one character.
+#
+# Note the id. CK3 event ids are namespace.NUMBER - no vanilla event and no
+# installed mod uses a named suffix, so hd_event.iberian_pressure would not
+# load. The orchestrator names the action iberian_pressure; the engine sees 0200.
+#
+# Two things reach this event, because a CK3 event takes no parameters:
+#   - saved scopes set immediately before firing: scope:hd_unifier and
+#     scope:hd_partner_1 .. hd_partner_4, each guarded with exists
+#   - global_var:hd_pressure_level, 1 smoldering / 2 fervent / 3 crusade
+#
+# Every effect lives here. The orchestrator supplies who, and how strongly,
+# and nothing else. No title changes hands and no war starts: the strongest
+# tier grants hooks, which are leverage, and unlocks a later event the
+# recipient is free to refuse.
+
+hd_event.0200 = {
+	type = character_event
+	title = hd_event.0200.t
+	desc = hd_event.0200.desc
+	theme = learning
+
+	left_portrait = {
+		character = root
+		animation = thinking
+	}
+
+	trigger = {
+		is_landed = yes
+		is_adult = yes
+	}
+
+	immediate = {
+		debug_log = "HD:/;/event_fired/;/hd_event.0200"
+	}
+
+	# Take it up. The coalition forms; what is done with it is theirs to decide.
+	option = {
+		name = hd_event.0200.a
+
+		# Truces with every partner named, at every intensity.
+		if = {
+			limit = { global_var:hd_pressure_level >= 1 }
+			if = {
+				limit = { exists = scope:hd_partner_1 }
+				add_truce_both_ways = {
+					character = scope:hd_partner_1
+					years = 10
+					name = hd_iberian_pressure_truce
+				}
+			}
+			if = {
+				limit = { exists = scope:hd_partner_2 }
+				add_truce_both_ways = {
+					character = scope:hd_partner_2
+					years = 10
+					name = hd_iberian_pressure_truce
+				}
+			}
+			if = {
+				limit = { exists = scope:hd_partner_3 }
+				add_truce_both_ways = {
+					character = scope:hd_partner_3
+					years = 10
+					name = hd_iberian_pressure_truce
+				}
+			}
+			if = {
+				limit = { exists = scope:hd_partner_4 }
+				add_truce_both_ways = {
+					character = scope:hd_partner_4
+					years = 10
+					name = hd_iberian_pressure_truce
+				}
+			}
+		}
+
+		# Fervent and above: alliances, and the union decision unlocked.
+		if = {
+			limit = { global_var:hd_pressure_level >= 2 }
+			if = {
+				limit = { exists = scope:hd_partner_1 }
+				create_alliance = {
+					target = scope:hd_partner_1
+					allied_through_owner = root
+					allied_through_target = scope:hd_partner_1
+				}
+			}
+			if = {
+				limit = { exists = scope:hd_partner_2 }
+				create_alliance = {
+					target = scope:hd_partner_2
+					allied_through_owner = root
+					allied_through_target = scope:hd_partner_2
+				}
+			}
+			if = {
+				limit = { exists = scope:hd_partner_3 }
+				create_alliance = {
+					target = scope:hd_partner_3
+					allied_through_owner = root
+					allied_through_target = scope:hd_partner_3
+				}
+			}
+			if = {
+				limit = { exists = scope:hd_partner_4 }
+				create_alliance = {
+					target = scope:hd_partner_4
+					allied_through_owner = root
+					allied_through_target = scope:hd_partner_4
+				}
+			}
+		}
+		if = {
+			limit = { global_var:hd_pressure_level >= 2 }
+			set_variable = { name = hd_may_press_union years = 30 }
+		}
+
+		# Crusade only: hooks, and a later inheritance opening.
+		if = {
+			limit = { global_var:hd_pressure_level >= 3 }
+			if = {
+				limit = { exists = scope:hd_partner_1 }
+				add_hook = {
+					type = favor_hook
+					target = scope:hd_partner_1
+				}
+			}
+			if = {
+				limit = { exists = scope:hd_partner_2 }
+				add_hook = {
+					type = favor_hook
+					target = scope:hd_partner_2
+				}
+			}
+			if = {
+				limit = { exists = scope:hd_partner_3 }
+				add_hook = {
+					type = favor_hook
+					target = scope:hd_partner_3
+				}
+			}
+			if = {
+				limit = { exists = scope:hd_partner_4 }
+				add_hook = {
+					type = favor_hook
+					target = scope:hd_partner_4
+				}
+			}
+		}
+		if = {
+			limit = { global_var:hd_pressure_level >= 3 }
+			trigger_event = {
+				id = hd_event.0201
+				years = 5
+			}
+		}
+
+		# The appetite itself, scaled. One modifier, on the unifier only.
+		if = {
+			limit = { global_var:hd_pressure_level = 1 }
+			add_character_modifier = { modifier = hd_iberian_pressure_smoldering years = 15 }
+		}
+		if = {
+			limit = { global_var:hd_pressure_level = 2 }
+			add_character_modifier = { modifier = hd_iberian_pressure_fervent years = 20 }
+		}
+		if = {
+			limit = { global_var:hd_pressure_level = 3 }
+			add_character_modifier = { modifier = hd_iberian_pressure_crusade years = 25 }
+		}
+	}
+
+	# Decline. The pressure exists in the world; this ruler is not its instrument.
+	option = {
+		name = hd_event.0200.b
+		add_prestige = minor_prestige_gain
+	}
+}
+
+# The inheritance opening, five years on, and only from the strongest tier. It
+# offers a claim on a partner's primary title - the same mechanism grant_claim
+# uses - rather than moving a title, so the recipient still has to fight for it.
+hd_event.0201 = {
+	type = character_event
+	title = hd_event.0201.t
+	desc = hd_event.0201.desc
+	theme = learning
+
+	left_portrait = {
+		character = root
+		animation = thinking
+	}
+
+	trigger = {
+		is_landed = yes
+		exists = scope:hd_partner_1
+		exists = scope:hd_partner_1.primary_title
+	}
+
+	immediate = {
+		debug_log = "HD:/;/event_fired/;/hd_event.0201"
+	}
+
+	option = {
+		name = hd_event.0201.a
+		add_pressed_claim = scope:hd_partner_1.primary_title
+	}
+
+	option = {
+		name = hd_event.0201.b
+		add_prestige = minor_prestige_gain
+	}
+}
+

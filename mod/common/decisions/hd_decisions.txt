@@ -20,3 +20,55 @@ hd_rearm_director_decision = {
 	ai_check_interval = 0
 	ai_will_do = { base = 0 }
 }
+
+# Unlocked by hd_event.0200 at fervent intensity and above, for as long as the
+# hd_may_press_union variable lasts. It exists because the event's preview
+# promises it, and a preview that promises a decision nobody wrote is the same
+# fault as an action whose intent lives only in prose.
+#
+# It is deliberately self-contained. The scopes the event was fired with do not
+# survive to a decision taken years later, so this picks its own target at the
+# moment it is used: a neighbouring Iberian ruler, chosen by the player through
+# the ordinary decision interface. It grants a pressed claim and nothing more -
+# no title moves, and the war, if there is one, is the player's to declare.
+hd_press_iberian_union_decision = {
+	decision_group_type = decisions
+
+	picture = {
+		reference = "gfx/interface/illustrations/decisions/decision_misc.dds"
+	}
+
+	desc = hd_press_iberian_union_decision_desc
+	selection_tooltip = hd_press_iberian_union_decision_tooltip
+
+	is_shown = {
+		has_variable = hd_may_press_union
+	}
+
+	is_valid = {
+		is_landed = yes
+		any_neighboring_top_liege_realm_owner = {
+			NOT = { this = root }
+			exists = primary_title
+		}
+	}
+
+	effect = {
+		random_neighboring_top_liege_realm_owner = {
+			limit = {
+				NOT = { this = root }
+				exists = primary_title
+			}
+			save_scope_as = hd_union_claim
+		}
+		if = {
+			limit = { exists = scope:hd_union_claim }
+			add_pressed_claim = scope:hd_union_claim.primary_title
+			debug_log = "HD:/;/event_fired/;/hd_press_iberian_union_decision"
+		}
+		remove_variable = hd_may_press_union
+	}
+
+	ai_check_interval = 0
+	ai_will_do = { base = 0 }
+}

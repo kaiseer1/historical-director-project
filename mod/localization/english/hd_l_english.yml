@@ -34,3 +34,23 @@
  hd_event.0102.desc:0 "[scope:hd_petitioner.GetTitledFirstNameNicknamedNoTooltipRegnal] has lost ground and come to us rather than to the victor. The request is for protection. The unspoken part is that protection, offered long enough, becomes something else.\n\nWe may take them under our care, and understand what that means. Or we may simply help them, and let them remain themselves."
  hd_event.0102.a:0 "Take them under our protection."
  hd_event.0102.b:0 "Help them stand on their own."
+
+ hd_iberian_pressure_smoldering:0 "Iberian Pressure: Smoldering"
+ hd_iberian_pressure_fervent:0 "Iberian Pressure: Fervent"
+ hd_iberian_pressure_crusade:0 "Iberian Pressure: A Crusading Temper"
+ hd_iberian_pressure_truce:0 "Iberian Accord"
+
+ hd_event.0200.t:0 "The Peninsula Draws Together"
+ hd_event.0200.desc:0 "Envoys have been arriving all season, and none of them says the word aloud. Every court in the peninsula has reached the same arithmetic independently: alone, none of them can finish what is in front of them, and together the question is only who leads.\n\nNothing has been promised. Accords could be sworn, arms shared, and the matter of who inherits from whom left to settle itself in the usual way. Or the season could pass, as seasons do."
+ hd_event.0200.a:0 "Let the accords be sworn."
+ hd_event.0200.b:0 "The peninsula can wait."
+
+ hd_event.0201.t:0 "A Question of Inheritance"
+ hd_event.0201.desc:0 "The accords have held longer than anyone expected, and the lawyers have been busy. There is a case - not a strong one, but a case - that [scope:hd_partner_1.GetTitledFirstNameNicknamedNoTooltipRegnal]'s title should have come to this house, and enough of the peninsula now owes us enough that the case would be heard.\n\nPressing it would mean war eventually. Letting it lie would mean the argument is never made again."
+ hd_event.0201.a:0 "Press the claim."
+ hd_event.0201.b:0 "Let it lie."
+
+ hd_press_iberian_union_decision:0 "Press the Union"
+ hd_press_iberian_union_decision_desc:0 "The accords sworn during the pressure gave this house standing it did not have before. Standing can be spent. A claim pressed now against a neighbour would be heard, where a year ago it would have been laughed at."
+ hd_press_iberian_union_decision_tooltip:0 "Gain a pressed claim on a neighbouring ruler's primary title."
+ hd_press_iberian_union_decision_confirm:0 "Let the lawyers begin."

@@ -69,3 +69,30 @@ hd_succession_momentum = {
 	ai_war_cooldown = -1
 	levy_size = 0.25
 }
+
+# --- Iberian pressure ------------------------------------------------------
+# The three intensities of the macro event. Deliberately milder than the
+# momentum modifiers: momentum pays for one war a ruler was already given a
+# reason to fight, while this is an ambient disposition across a whole region
+# and lands on a ruler who did not ask for it. It leans on the peninsula rather
+# than shoving.
+hd_iberian_pressure_smoldering = {
+	icon = martial_positive
+	ai_war_chance = 10
+	monthly_prestige = 0.5
+}
+
+hd_iberian_pressure_fervent = {
+	icon = martial_positive
+	ai_war_chance = 20
+	monthly_prestige = 1
+	advantage = 2
+}
+
+hd_iberian_pressure_crusade = {
+	icon = martial_positive
+	ai_war_chance = 30
+	monthly_prestige = 1.5
+	advantage = 4
+	levy_size = 0.1
+}

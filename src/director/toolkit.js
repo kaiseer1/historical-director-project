@@ -17,6 +17,7 @@
 import { resolveTagged } from '../bridge/ck3Script.js';
 import { expectationFor } from './bookmarkTiers.js';
 import { MOMENTUM, MOMENTUM_KEYS, isMomentum, momentumOf, momentumScript, momentumPreview, momentumSupport } from './momentum.js';
+import { INTENSITY, INTENSITY_KEYS, MAX_PARTNERS, intensityBand, iberianPressureScript } from './macroEvents.js';
 
 /** Characters CK3 script treats structurally. Never let these through. */
 const UNSAFE = /["'{}\[\]$\\=#\r\n\t]/g;
@@ -162,12 +163,37 @@ function distanceNote(state, ids) {
 }
 
 /**
+ * The cultures CK3 places on the Iberian peninsula.
+ *
+ * This is a proxy, and worth being honest about why. The snapshot reports which
+ * regions the *player's* realm spans, not which region each other realm sits
+ * in, so there is no way to ask "is this ruler inside Iberia" directly - the
+ * perception limit recorded in PROJECT.md section 12. Culture is the closest
+ * thing the snapshot actually carries, and on the peninsula it is a good one:
+ * these cultures are Iberian wherever they are found, and a Castilian realm is
+ * not somewhere else by accident.
+ *
+ * Combined with the neighbourhood ring, which is checked separately, it is
+ * close enough to bound a regional event. A realm of the wrong culture is
+ * refused rather than guessed at.
+ */
+const IBERIAN_CULTURES = /andalus|castil|catalan|portug|basque|galician|asturleon|aragon|mozarab|visigoth|suebi|navarr/i;
+
+/**
+ * @param {any} realm
+ * @returns {boolean}
+ */
+function isIberian(realm) {
+  return IBERIAN_CULTURES.test(realm?.culture ?? '');
+}
+
+/**
  * @typedef {object} Action
  * @property {string} signature
  * @property {string} description
  * @property {object} parameters JSON Schema for the model
  * @property {(args: any, state: any, baseline: any) => string|null} validate returns an error string, or null when valid. Most actions ignore the baseline; adjust_title_tier requires it.
- * @property {(args: any, state: any) => string} preview one sentence, shown to the player before approval
+ * @property {(args: any, state: any, baseline: any) => string} preview shown to the player before approval; most actions ignore the baseline
  * @property {(args: any, token: number, state: any) => string[]} toScript the guarded CK3 script
  */
 
@@ -539,6 +565,121 @@ export const TOOLKIT = {
   // An event whose trigger fails does nothing, and the applied line comes from
   // the batch rather than the event, so each event logs HD:/;/event_fired when
   // it actually fires and the orchestrator reports the difference.
+  // The first macro action: one proposal that sets a process running across
+  // several realms instead of doing one thing to one character. Nothing here
+  // transfers a title and nothing starts a war - it makes a union reachable and
+  // a coalition affordable, and the rulers inside it still decide.
+  iberian_pressure: {
+    signature: 'iberian_pressure',
+    description:
+      'Set the Reconquista-era pressure toward Iberian consolidation in motion around one ruler. '
+      + 'Grants truces and, at higher intensity, alliances and hooks between the unifier and their partners, '
+      + 'plus a temporary appetite for war in the peninsula and a decision they may use to press a dynastic union. '
+      + 'It transfers no titles and starts no wars: every recipient still chooses. '
+      + 'The intensity you may ask for is bounded by the live balance of the peninsula, and an out-of-band choice is refused.',
+    parameters: {
+      type: 'object',
+      properties: {
+        unifier: { type: 'integer', description: 'Character id of the realm the pressure gathers around' },
+        partners: {
+          type: 'array',
+          items: { type: 'integer' },
+          maxItems: MAX_PARTNERS,
+          description: `Up to ${MAX_PARTNERS} character ids drawn into the coalition. May be empty.`,
+        },
+        intensity: {
+          type: 'string',
+          enum: INTENSITY_KEYS,
+          description:
+            'How strong the pressure is. smoldering: truces only. fervent: truces, alliances and a union decision. '
+            + 'crusade: all of that plus hooks and a later inheritance event. The live state decides which of these is available.',
+        },
+      },
+      required: ['unifier', 'partners', 'intensity'],
+      additionalProperties: false,
+    },
+
+    validate(a, state, baseline) {
+      const unifier = safeInt(a.unifier);
+      if (unifier === null || !state.realmsById.has(unifier)) {
+        return `unifier ${a.unifier} is not a ruler in the snapshot`;
+      }
+
+      if (!Array.isArray(a.partners)) return 'partners must be an array of character ids, possibly empty';
+      if (a.partners.length > MAX_PARTNERS) {
+        return `at most ${MAX_PARTNERS} partners; ${a.partners.length} were named`;
+      }
+
+      const partners = a.partners.map(safeInt);
+      for (const p of partners) {
+        if (p === null || !state.realmsById.has(p)) return `partner ${p} is not a ruler in the snapshot`;
+        if (p === unifier) return 'the unifier cannot also be one of their own partners';
+      }
+      if (new Set(partners).size !== partners.length) return 'the same partner is named twice';
+
+      // Every named realm has to belong to the peninsula. See IBERIAN_CULTURES
+      // for why this is culture rather than geography.
+      const named = [unifier, ...partners];
+      const outsiders = named
+        .map((id) => state.realmsById.get(id))
+        .filter((r) => !isIberian(r));
+      if (outsiders.length) {
+        const names = outsiders.map((r) => `${r.primaryTitle || r.ruler} (${r.culture || 'unknown culture'})`);
+        return `this is an Iberian event and ${names.join(', ')} ${outsiders.length > 1 ? 'are' : 'is'} not of the peninsula`;
+      }
+
+      const locality = requireLocality(state, named, 'iberian_pressure');
+      if (locality) return locality;
+
+      // The band. Asking for a crusade in a peninsula that has almost nothing
+      // left to press against is refused rather than honoured, and the refusal
+      // reports the figures it measured.
+      const key = String(a.intensity ?? '');
+      if (!INTENSITY_KEYS.includes(key)) {
+        return `intensity "${a.intensity}" is not one of ${INTENSITY_KEYS.join(', ')}`;
+      }
+      const band = intensityBand(state, baseline);
+      if (band.allowed.length === 0) {
+        return `no Iberian pressure of any intensity fits this world: ${band.reason}`;
+      }
+      if (!band.allowed.includes(key)) {
+        return `"${key}" is out of band here - ${band.reason}; the intensities this world supports are ${band.allowed.join(', ')}`;
+      }
+      return null;
+    },
+
+    preview(a, state, baseline) {
+      const unifier = state.realmsById.get(safeInt(a.unifier));
+      const partners = (a.partners ?? [])
+        .map(safeInt)
+        .map((id) => state.realmsById.get(id))
+        .filter(Boolean);
+      const tier = INTENSITY[String(a.intensity ?? '')] ?? null;
+      const band = intensityBand(state, baseline);
+
+      const who = partners.length
+        ? `${unifier?.ruler ?? a.unifier}, drawing in ${partners.map((r) => r.ruler || r.primaryTitle).join(', ')}`
+        : `${unifier?.ruler ?? a.unifier}, with no partners named`;
+
+      // Every mechanical effect, itemised. A macro action touches several realms
+      // at once, so a one-line summary would be the least honest preview in the
+      // toolkit rather than the most convenient.
+      const effects = tier ? tier.effects.map((e) => `  - ${e}`).join('\n') : '  - (unknown intensity)';
+
+      return `Set an Iberian pressure of ${tier?.label ?? 'unknown'} intensity around ${who}.\n`
+        + `This grants:\n${effects}\n`
+        + 'No title changes hands and no war begins; every recipient may decline what this offers.\n'
+        + `Intensity band for this world: ${band.allowed.join(', ') || 'none'} - ${band.reason}.`
+        + distanceNote(state, [safeInt(a.unifier), ...(a.partners ?? []).map(safeInt)]);
+    },
+
+    toScript: (a, token, state) => iberianPressureScript({
+      unifierTag: tagOf(state, safeInt(a.unifier)),
+      partnerTags: (a.partners ?? []).map((p) => tagOf(state, safeInt(p))).filter((t) => t !== null),
+      intensity: String(a.intensity ?? ''),
+    }, token),
+  },
+
   trigger_event: {
     signature: 'trigger_event',
     description:
@@ -628,5 +769,7 @@ export function validateProposal(proposed, state, baseline) {
   const err = action.validate(args, state, baseline);
   if (err) return { ok: false, error: err };
 
-  return { ok: true, action, preview: action.preview(args, state) };
+  // The baseline reaches preview as well as validate: a macro action's preview
+  // reports the band it was checked against, and that band is computed from it.
+  return { ok: true, action, preview: action.preview(args, state, baseline) };
 }
