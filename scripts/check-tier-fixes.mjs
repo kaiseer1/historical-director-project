@@ -2054,4 +2054,77 @@ function iberiaSnapshot(year) {
   );
 }
 
+// --- geography arriving before the realms ------------------------------------
+// The mod emits realm_in_region from inside each region's sweep, and the realm
+// lines afterwards from a single pass over the collected set. So the geography
+// arrives first, a lookup on arrival found an empty list every time, and all of
+// it was silently dropped: a live snapshot carried 966 such records and not one
+// reached a realm. Every action that asks where a realm is fell back to
+// culture - the proxy the geography was added to replace - and
+// historical_moment, which refuses rather than falling back, could never be
+// proposed at all.
+
+/** Feed records in the order the game actually emits them. */
+function snapshotWithGeography({ regionsFirst = true } = {}) {
+  const a = new SnapshotAssembler();
+  const feed = (line) => {
+    const rec = parseLine('[00:00:00][effect.cpp:1]: ' + line);
+    return rec ? a.ingest(rec) : null;
+  };
+  const realms = [
+    'HD:/;/realm/;/11/;/Alfonso/;/Kingdom of Castile/;/Kingdom/;/24/;/Castilian/;/Catholic/;/Burgos/;/Jimena/;/House Jimena/;/yes/;/Feudal',
+    'HD:/;/realm/;/12/;/Fernando/;/Kingdom of Leon/;/Kingdom/;/18/;/Castilian/;/Catholic/;/Leon/;/Jimena/;/House Jimena/;/yes/;/Feudal',
+  ];
+  const regions = [
+    'HD:/;/realm_in_region/;/11/;/world_europe_west_iberia',
+    'HD:/;/realm_in_region/;/12/;/world_europe_west_iberia',
+    'HD:/;/realm_in_region/;/12/;/world_africa_north_west',
+  ];
+
+  feed('HD:/;/snapshot_begin/;/90/;/1205.1.1/;/439000/;/11');
+  for (const l of regionsFirst ? [...regions, ...realms] : [...realms, ...regions]) feed(l);
+  return feed('HD:/;/snapshot_end/;/90').snapshot;
+}
+
+{
+  const snap = snapshotWithGeography({ regionsFirst: true });
+  const castile = snap.realmsById.get(11);
+  const leon = snap.realmsById.get(12);
+  check(
+    'G1. geography emitted before the realm lines still reaches the realms',
+    Array.isArray(castile.regions) && castile.regions.includes('world_europe_west_iberia')
+      && Array.isArray(leon.regions) && leon.regions.length === 2,
+    'Castile ' + JSON.stringify(castile.regions) + ', Leon ' + JSON.stringify(leon.regions),
+  );
+}
+
+{
+  // Order must not matter in either direction, so a later change to the mod's
+  // emission order cannot quietly break this again.
+  const snap = snapshotWithGeography({ regionsFirst: false });
+  check(
+    'G2. and so does geography emitted after them',
+    snap.realmsById.get(11).regions?.includes('world_europe_west_iberia') === true,
+    'buffered either way',
+  );
+}
+
+{
+  // The consequence that mattered: with geography present, historical_moment
+  // can be proposed at all. Without it the action refuses outright.
+  const snap = snapshotWithGeography();
+  snap.year = 1205;
+  for (const r of snap.realms) r.inNeighbourhood = true;
+  const r = validateProposal(
+    { action: 'historical_moment', args: { moment: 'iberian_union', actor: 11, target: 12 } },
+    snap,
+    null,
+  );
+  check(
+    'G3. and historical_moment can now be proposed against a real snapshot',
+    r.ok,
+    r.ok ? 'validates against geography from the wire' : 'REJECTED: ' + r.error,
+  );
+}
+
 try { fs.unlinkSync(tmp); } catch { /* already gone */ }

@@ -31,6 +31,8 @@ export class SnapshotAssembler {
           totalDays: Number(rec.fields[2]) || 0,
           playerId: Number(rec.fields[3]) || 0,
           realms: [],
+          /** @type {Map<number, string[]>} filled before the realms exist */
+          regionsById: new Map(),
         };
         return null;
 
@@ -50,13 +52,23 @@ export class SnapshotAssembler {
         // Which regions a realm actually holds land in, one record per pair.
         // Geography rather than culture: a realm's culture says where its
         // rulers came from, not where the realm is.
+        //
+        // Buffered rather than matched on arrival, because these records arrive
+        // BEFORE the realm lines do. The mod emits them from inside each
+        // region's sweep, and the realm lines come afterwards from a single pass
+        // over the collected set - so a lookup here found an empty list every
+        // time and silently dropped all of it. A live snapshot carried 966 of
+        // these records and not one reached a realm, which left every action
+        // that asks where a realm is falling back to culture, the proxy the
+        // geography was added to replace.
+        //
+        // Keyed by character id and applied in finalise, so arrival order
+        // stops mattering in either direction.
         if (!this.pending) return null;
         const rid = Number(rec.fields[0]);
-        const inRegion = this.pending.realms.find((r) => r.id === rid);
-        if (inRegion) {
-          if (!Array.isArray(inRegion.regions)) inRegion.regions = [];
-          if (!inRegion.regions.includes(rec.fields[1])) inRegion.regions.push(rec.fields[1]);
-        }
+        if (!this.pending.regionsById.has(rid)) this.pending.regionsById.set(rid, []);
+        const seen = this.pending.regionsById.get(rid);
+        if (!seen.includes(rec.fields[1])) seen.push(rec.fields[1]);
         return null;
       }
 
@@ -172,6 +184,13 @@ export class SnapshotAssembler {
  */
 function finalise(snap) {
   const realmsById = new Map(snap.realms.map((r) => [r.id, r]));
+
+  // Geography, attached now that every realm exists. Buffered on the way in
+  // because the region records arrive first; see the realm_in_region case.
+  for (const [id, regions] of snap.regionsById ?? new Map()) {
+    const realm = realmsById.get(id);
+    if (realm) realm.regions = regions;
+  }
   const year = Number(String(snap.date).match(/\d{3,4}/)?.[0]) || 0;
   const byFootprint = [...snap.realms].sort((a, b) => b.countiesInSphere - a.countiesInSphere);
   return {
