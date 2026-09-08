@@ -1,4 +1,4 @@
-import { renderRealmTable } from '../model/WorldState.js';
+import { renderRealmTable, belligerentName } from '../model/WorldState.js';
 import { toolSchemas, validateProposal } from './toolkit.js';
 import { label, labelList } from './regions.js';
 import { bookmarkBriefing } from './bookmarkTiers.js';
@@ -129,12 +129,13 @@ function warSection(snapshot) {
 
   const name = (id) => {
     const r = snapshot.realmsById?.get(id);
-    return r ? `${r.ruler} of ${r.primaryTitle}` : `character ${id}`;
+    return r ? `${r.ruler} of ${r.primaryTitle}` : belligerentName(snapshot, id);
   };
 
   return [
     '## Wars under way',
     'These are being fought as you read this. A realm already at war does not need a casus belli, and one being invaded is not drifting from the record by choice.',
+    'A war is reported whenever either party is inside the sphere, so some of the other parties are outside it and cannot be named or acted on. That is a limit of what is being watched, not a fact about the war.',
     ...wars.map((w) => `- ${name(w.attacker)} is attacking ${name(w.defender)}${w.name ? ` (${w.name})` : ''}`),
     '',
   ];

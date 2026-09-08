@@ -1,7 +1,7 @@
 import { loadConfig, describeConfig } from './config.js';
 import { LogTailer } from './bridge/LogTailer.js';
 import { RunFileManager } from './bridge/RunFileManager.js';
-import { SnapshotAssembler } from './model/WorldState.js';
+import { SnapshotAssembler, belligerentName } from './model/WorldState.js';
 import { LoreBook } from './lore/LoreBook.js';
 import { Baseline } from './model/Baseline.js';
 import { AuditClock } from './model/AuditClock.js';
@@ -303,7 +303,7 @@ tailer.on('record', async (rec) => {
       // Director was reacting to, and a count on its own would leave them with
       // the same question one step later.
       const wars = out.snapshot.wars ?? [];
-      const naming = (id) => out.snapshot.realmsById.get(id)?.primaryTitle ?? `character ${id}`;
+      const naming = (id) => belligerentName(out.snapshot, id);
       const warNote = wars.length
         ? `; ${wars.length} war${wars.length === 1 ? '' : 's'} under way: ${wars.map((w) => `${naming(w.attacker)} -> ${naming(w.defender)}`).join(', ')}`
         : '';

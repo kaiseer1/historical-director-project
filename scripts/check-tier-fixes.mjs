@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SnapshotAssembler, renderRealmTable, cleanWarName } from '../src/model/WorldState.js';
+import { SnapshotAssembler, renderRealmTable, cleanWarName, belligerentName } from '../src/model/WorldState.js';
 import { parseLine } from '../src/bridge/protocol.js';
 import { Baseline } from '../src/model/Baseline.js';
 import { AuditClock } from '../src/model/AuditClock.js';
@@ -2442,6 +2442,45 @@ function snapshotWithWars(warLines = []) {
     cleanWarName('WHATSIT:THING,4 Siege of Zaragoza') === 'WHATSIT:THING,4 Siege of Zaragoza'
       && cleanWarName('') === '',
     cleanWarName('WHATSIT:THING,4 Siege of Zaragoza'),
+  );
+}
+
+// --- the half of a war that is outside the sphere ----------------------------
+// Reporting each war from both sides means a war reaches the Director whenever
+// EITHER party is inside the sphere, which is the point - and which guarantees
+// that some of the other parties are outside it. The first live Iberian
+// snapshot to carry a war read "character 57275 -> Kingdom of Navarra".
+
+{
+  const snap = snapshotWithWars([WAR]);
+  check(
+    'W13. a belligerent in the snapshot is named from it',
+    belligerentName(snap, 11) === 'Kingdom of Castile',
+    belligerentName(snap, 11),
+  );
+}
+
+{
+  // A bare id occupies the place where a name goes, so it reads as one, and
+  // the model can neither address it nor look it up. Naming the gap is the
+  // honest answer and the useful one.
+  const snap = snapshotWithWars([WAR]);
+  const said = belligerentName(snap, 57275);
+  check(
+    'W14. one the snapshot never saw is described, not numbered',
+    said === 'a ruler outside the observed sphere' && !/57275/.test(said),
+    said,
+  );
+}
+
+{
+  // The war itself must survive that: half-known is still worth reporting, and
+  // dropping it would hide a war from the realm being invaded.
+  const snap = snapshotWithWars(['HD:/;/war/;/506/;/57275/;/12/;/Conquest of Navarra']);
+  check(
+    'W15. and the war is still reported, and still blocks a claim on the pair',
+    snap.wars.length === 1 && snap.warBetween(57275, 12) !== null,
+    'a war with one unknown party is a war',
   );
 }
 

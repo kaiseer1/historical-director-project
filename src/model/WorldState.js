@@ -241,6 +241,28 @@ export function cleanWarName(raw) {
     .trim();
 }
 
+/**
+ * How a belligerent is described when the snapshot has never heard of them.
+ *
+ * Emitting each war from both sides means a war reaches the Director whenever
+ * *either* party is inside the sphere - which is the point, and which
+ * guarantees that some of the other parties are outside it. The first live
+ * Iberian snapshot to carry a war read "character 57275 -> Kingdom of Navarra".
+ *
+ * A bare id is worse than useless there: it occupies the place where a name
+ * goes, so it reads as one, and the model cannot address it, look it up, or
+ * reason about it. Saying where the gap is instead keeps the war legible and
+ * says plainly why half of it is not.
+ *
+ * @param {any} snap
+ * @param {number} id
+ */
+export function belligerentName(snap, id) {
+  const r = snap.realmsById?.get(id);
+  if (!r) return 'a ruler outside the observed sphere';
+  return r.primaryTitle || r.ruler || 'a ruler outside the observed sphere';
+}
+
 function finalise(snap) {
   const wars = [...(snap.warsById ?? new Map()).values()];
   const realmsById = new Map(snap.realms.map((r) => [r.id, r]));
