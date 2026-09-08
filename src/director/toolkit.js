@@ -18,7 +18,7 @@ import { resolveTagged } from '../bridge/ck3Script.js';
 import { expectationFor } from './bookmarkTiers.js';
 import { MOMENTUM, MOMENTUM_KEYS, isMomentum, momentumOf, momentumScript, momentumPreview, momentumSupport } from './momentum.js';
 import { INTENSITY, INTENSITY_KEYS, MAX_PARTNERS, intensityBand, iberianPressureScript, inRegion, hasRegionData, IBERIA_REGION, macroSupport } from './macroEvents.js';
-import { MOMENTS, MOMENT_KEYS, isMoment, inWindow, windowError, momentScript, momentPreview, momentSupport } from './moments.js';
+import { MOMENTS, MOMENT_KEYS, isMoment, inWindow, windowError, momentScript, momentPreview, momentSupport, targetTierError } from './moments.js';
 
 /** Characters CK3 script treats structurally. Never let these through. */
 const UNSAFE = /["'{}\[\]$\\=#\r\n\t]/g;
@@ -876,6 +876,12 @@ export const TOOLKIT = {
         return `${names.join(' and ')} ${names.length > 1 ? 'do' : 'does'} not hold land where ${MOMENTS[key].label} took place`;
       }
 
+      // What claiming this target's primary title would actually take. A
+      // moment aimed above its declared rank is a different event wearing its
+      // name.
+      const tier = targetTierError(key, state.realmsById.get(target)?.tierKey);
+      if (tier) return tier;
+
       return requireLocality(state, [actor, target], 'historical_moment');
     },
 
@@ -888,7 +894,7 @@ export const TOOLKIT = {
       const tier = target?.tierKey ? `the ${target.tierKey}-tier title ` : '';
 
       return `Stage ${MOMENTS[key]?.label ?? key} around ${actorName}, directed at ${targetName} and ${tier}${target?.primaryTitle ?? 'their primary title'}.`
-        + momentPreview(key, actorName, targetName)
+        + momentPreview(key, actorName, targetName, target?.tierKey ?? null)
         + distanceNote(state, [safeInt(a.actor), safeInt(a.target)]);
     },
 

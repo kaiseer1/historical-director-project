@@ -90,6 +90,7 @@ const DEFAULT_SPAN = 40;
  * @property {number} currencyAmount
  * @property {string} summary one sentence on what the moment is
  * @property {string} shape what the actor and target mean for this moment
+ * @property {string} targetTier the highest rank this moment can sensibly be aimed at
  * @property {string[]} sources
  */
 
@@ -118,6 +119,9 @@ export const MOMENTS = {
     summary:
       'the Christian crowns of the peninsula consolidating, which the record has ending in a permanent Castilian-Leonese union in 1230',
     shape: 'the actor is the crown that consolidates; the target is the crown absorbed',
+    // A union absorbs a crown. Aimed at an empire it would be one realm
+    // swallowing another whole, which is conquest wearing a union's name.
+    targetTier: 'kingdom',
     sources: [
       'https://en.wikipedia.org/wiki/Kingdom_of_Castile',
       'https://en.wikipedia.org/wiki/Kingdom_of_Le%C3%B3n',
@@ -148,7 +152,18 @@ export const MOMENTS = {
     currencyAmount: 600,
     summary:
       'Almohad power in the peninsula breaking after Las Navas de Tolosa in 1212, and al-Andalus passing piece by piece to whoever could hold it',
-    shape: 'the actor is whoever takes the ground; the target is the power losing it',
+    shape: 'the actor is whoever takes the ground; the target is the power losing it, once it has begun coming apart',
+    // The mechanism is a pressed claim on the target's primary title, and that
+    // is only "al-Andalus passing piece by piece" while the pieces are
+    // kingdom-sized. Aimed at the intact caliphate it claims the whole empire,
+    // Morocco included, in a single war - which is not this moment, it is
+    // Castile becoming the Almohad emperor.
+    //
+    // So the Director can back whoever is taking ground once the collapse has
+    // produced kingdom-tier successors. It cannot start the collapse with a
+    // claim, and pretending otherwise would be the puppetmastering every
+    // document here rules out.
+    targetTier: 'kingdom',
     sources: [
       'https://en.wikipedia.org/wiki/Almohad_Caliphate',
       'https://en.wikipedia.org/wiki/Battle_of_Las_Navas_de_Tolosa',
@@ -180,6 +195,7 @@ export const MOMENTS = {
     currencyAmount: 0,
     summary: 'the long erosion of Abbasid temporal power, ending at Baghdad in 1258',
     shape: 'not yet curated: the actor varies by century and the record does not name one',
+    targetTier: 'kingdom',
     sources: ['https://en.wikipedia.org/wiki/Abbasid_Caliphate'],
   },
 };
@@ -332,6 +348,48 @@ export function momentBriefing(snapshot, year) {
   ].join('\n');
 }
 
+/** Rank ordering, over the script-derived tier keys. */
+const TIER_RANK = { barony: 0, county: 1, duchy: 2, kingdom: 3, empire: 4 };
+
+/**
+ * Whether this moment can sensibly be aimed at a target of this rank.
+ *
+ * @param {string} key
+ * @param {string|null|undefined} tierKey
+ * @returns {string|null} the refusal, or null when it fits
+ */
+export function targetTierError(key, tierKey) {
+  const m = MOMENTS[key];
+  if (!m) return null;
+  if (!tierKey || !(tierKey in TIER_RANK)) {
+    return `no script-derived tier for the target, so the Director cannot tell what claiming their primary title would take`;
+  }
+  const cap = m.targetTier ?? 'kingdom';
+  if (TIER_RANK[tierKey] <= TIER_RANK[cap]) return null;
+  return `${m.label} is aimed at a ${cap}-tier realm at most, and this target is ${tierKey} tier - a pressed claim on an emperor's primary title is a claim on the whole empire in one war, which is not this moment`;
+}
+
+/**
+ * What claiming this target's primary title actually takes.
+ *
+ * The preview used to say "which at kingdom tier carries its de jure vassals
+ * with it" whatever the target was, so a live proposal against a 97-county
+ * empire described itself in one sentence as both "the empire-tier title the
+ * Mu'minid Empire" and as a kingdom claim. Understating what approval does is
+ * the one failure the whole approval gate exists to prevent.
+ *
+ * @param {string|null|undefined} tierKey
+ */
+function whatItTakes(tierKey) {
+  switch (tierKey) {
+    case 'empire': return 'which is the entire empire and every realm beneath it';
+    case 'kingdom': return 'which at kingdom tier carries its de jure vassals with it';
+    case 'duchy': return 'a single duchy and the counties under it';
+    case 'county': return 'a single county';
+    default: return 'of unknown rank, so what it carries cannot be stated';
+  }
+}
+
 /**
  * The sentence appended to the proposal preview.
  *
@@ -342,9 +400,10 @@ export function momentBriefing(snapshot, year) {
  * @param {string} key
  * @param {string} actorName
  * @param {string} targetName
+ * @param {string|null} [targetTier] the target's script-derived tier
  */
-export function momentPreview(key, actorName, targetName) {
+export function momentPreview(key, actorName, targetName, targetTier) {
   if (!isMoment(key)) return '';
   const m = MOMENTS[key];
-  return ` This is ${m.label}: ${m.summary}. ${actorName} gains a pressed claim on ${targetName}'s primary title - which at kingdom tier carries its de jure vassals with it - along with ${m.gold} gold, ${m.currencyAmount} ${m.currency}, and a ${m.years}-year appetite for pressing it. No war is started and no title changes hands: ${actorName} still has to fight for it, and may not.`;
+  return ` This is ${m.label}: ${m.summary}. ${actorName} gains a pressed claim on ${targetName}'s primary title - ${whatItTakes(targetTier)} - along with ${m.gold} gold, ${m.currencyAmount} ${m.currency}, and a ${m.years}-year appetite for pressing it. No war is started and no title changes hands: ${actorName} still has to fight for it, and may not.`;
 }

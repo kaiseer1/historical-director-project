@@ -26,6 +26,23 @@ import path from 'node:path';
 const REPEAT_WINDOW_YEARS = 25;
 
 /**
+ * Actions that do the same thing to the world, grouped by what they do.
+ *
+ * The guard first fingerprinted on the verb, which let the same effect through
+ * under a second name: Alfonso VIII had been granted a pressed claim on Leon six
+ * times as `grant_claim`, and `historical_moment` proposed a seventh because it
+ * is spelled differently. Both grant a pressed claim on the same title; the
+ * claim after the first is a no-op and the war chest beside it is not.
+ *
+ * Only actions with genuinely interchangeable effects belong together.
+ * `iberian_pressure` grants truces, alliances and hooks and stays on its own.
+ */
+const EFFECT_CLASS = {
+  grant_claim: 'pressed_claim',
+  historical_moment: 'pressed_claim',
+};
+
+/**
  * The identity of an action: what it does, and to whom.
  *
  * Deliberately only the character ids. `momentum`, `intensity` and `value` are
@@ -42,6 +59,7 @@ const REPEAT_WINDOW_YEARS = 25;
  */
 function fingerprintOf(action, args) {
   if (!action || !args || typeof args !== 'object') return null;
+  const effect = EFFECT_CLASS[action] ?? action;
 
   const ids = [];
   for (const key of ['actor', 'target', 'host', 'unifier']) {
@@ -54,7 +72,7 @@ function fingerprintOf(action, args) {
   }
 
   if (ids.length === 0) return null;
-  return `${action}:${[...ids].sort((a, b) => a - b).join(',')}`;
+  return `${effect}:${[...ids].sort((a, b) => a - b).join(',')}`;
 }
 
 export class LoreBook {

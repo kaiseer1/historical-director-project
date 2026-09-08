@@ -2071,9 +2071,13 @@ function snapshotWithGeography({ regionsFirst = true } = {}) {
     const rec = parseLine('[00:00:00][effect.cpp:1]: ' + line);
     return rec ? a.ingest(rec) : null;
   };
+  // With their tier records, as a real snapshot always carries them: the
+  // toolkit refuses rather than guesses when the script-derived tier is absent.
   const realms = [
     'HD:/;/realm/;/11/;/Alfonso/;/Kingdom of Castile/;/Kingdom/;/24/;/Castilian/;/Catholic/;/Burgos/;/Jimena/;/House Jimena/;/yes/;/Feudal',
+    'HD:/;/realm_tier/;/11/;/kingdom',
     'HD:/;/realm/;/12/;/Fernando/;/Kingdom of Leon/;/Kingdom/;/18/;/Castilian/;/Catholic/;/Leon/;/Jimena/;/House Jimena/;/yes/;/Feudal',
+    'HD:/;/realm_tier/;/12/;/kingdom',
   ];
   const regions = [
     'HD:/;/realm_in_region/;/11/;/world_europe_west_iberia',
@@ -2125,6 +2129,97 @@ function snapshotWithGeography({ regionsFirst = true } = {}) {
     r.ok,
     r.ok ? 'validates against geography from the wire' : 'REJECTED: ' + r.error,
   );
+}
+
+// --- what claiming a primary title actually takes -----------------------------
+// A live proposal described itself, in one sentence, as both "the empire-tier
+// title the Mu'minid Empire" and as a claim "which at kingdom tier carries its
+// de jure vassals with it". The second half was hardcoded. Understating what
+// approval does is the one failure the approval gate exists to prevent, and the
+// target there held 97 counties.
+
+function tierPair(targetTier) {
+  return {
+    year: 1205,
+    realmsById: new Map([
+      [1, { id: 1, tag: 0, ruler: 'Alfonso', primaryTitle: 'Kingdom of Castile', tierKey: 'kingdom', inNeighbourhood: true, regions: ['world_europe_west_iberia'] }],
+      [2, { id: 2, tag: 1, ruler: 'an-Nasir', primaryTitle: 'the Muminid Empire', tierKey: targetTier, inNeighbourhood: true, regions: ['world_europe_west_iberia'] }],
+    ]),
+  };
+}
+const stage = (moment, st) => validateProposal({ action: 'historical_moment', args: { moment, actor: 1, target: 2 } }, st, null);
+
+{
+  const r = stage('almohad_decline', tierPair('empire'));
+  check(
+    'T1. a moment aimed above its declared rank is refused, and says what that would take',
+    !r.ok && /whole empire in one war/.test(r.error) && /kingdom-tier realm at most/.test(r.error),
+    r.ok ? 'ACCEPTED a claim on a 97-county empire' : r.error.slice(0, 120),
+  );
+}
+
+{
+  const r = stage('almohad_decline', tierPair('kingdom'));
+  check(
+    'T2. and permitted once the collapse has produced a kingdom-sized piece',
+    r.ok && /carries its de jure vassals with it/.test(r.preview),
+    r.ok ? 'permitted, preview states kingdom tier' : r.error,
+  );
+}
+
+{
+  // The preview must track the target rather than assume one.
+  const duchy = tierPair('duchy');
+  const r = stage('iberian_union', duchy);
+  check(
+    'T3. the preview states the tier the target actually holds',
+    r.ok && /a single duchy and the counties under it/.test(r.preview) && !/at kingdom tier/.test(r.preview),
+    r.ok ? r.preview.match(/primary title - ([^-]+) -/)?.[1]?.trim() : r.error,
+  );
+}
+
+{
+  // Fail closed where the tier is unknown: without it the Director cannot say
+  // what a claim would carry, and the preview must not invent an answer.
+  const unknown = tierPair(null);
+  const r = stage('iberian_union', unknown);
+  check(
+    'T4. an unknown target tier is refused rather than guessed',
+    !r.ok && /no script-derived tier/.test(r.error),
+    r.error.slice(0, 110),
+  );
+}
+
+// --- the same effect under a second name --------------------------------------
+// The guard first fingerprinted the verb. Alfonso VIII had been granted a
+// pressed claim on Leon six times as grant_claim, and historical_moment
+// proposed a seventh because it is spelled differently - both grant a pressed
+// claim on the same title, and the war chest beside it is not a no-op.
+
+{
+  const { book, file } = ledger();
+  book.record({ date: '7 Jan 1201', year: 1201, verdict: 'approved', action: 'grant_claim', args: { actor: 1, target: 2 }, summary: 'Alfonso -> Leon' });
+  const repeat = book.approvedMatch('historical_moment', { moment: 'iberian_union', actor: 1, target: 2 }, 1205);
+  check(
+    'T5. a moment repeating a claim already granted is caught across action names',
+    repeat !== null && repeat.date === '7 Jan 1201',
+    repeat ? 'matched the grant_claim of ' + repeat.date : 'MISSED, which is the seventh claim',
+  );
+  fs.rmSync(file, { force: true });
+}
+
+{
+  // But only where the effect really is the same. iberian_pressure grants
+  // truces, alliances and hooks, and is not a pressed claim by another name.
+  const { book, file } = ledger();
+  book.record({ date: '7 Jan 1201', year: 1201, verdict: 'approved', action: 'grant_claim', args: { actor: 1, target: 2 }, summary: 'x' });
+  check(
+    'T6. and actions with genuinely different effects are still separate',
+    book.approvedMatch('iberian_pressure', { unifier: 1, partners: [2] }, 1205) === null
+      && book.approvedMatch('set_relations', { actor: 1, target: 2 }, 1205) === null,
+    'grouping is by effect, not by convenience',
+  );
+  fs.rmSync(file, { force: true });
 }
 
 try { fs.unlinkSync(tmp); } catch { /* already gone */ }
