@@ -9,7 +9,7 @@ not been is listed as such.
 **Status:** v0.5.2 alpha · `main`, companion mod v0.5.1 deployed
 **Last live test:** 8 September 2026 — a 1193-1206 Kingdom of Castile campaign. Findings in sections
 3c and 3g; the moment library and the duplicate guard both came out of it.
-**Last harness test:** 8 September 2026 — 141 tier and gate cases, 8 region cases, 4 localisation
+**Last harness test:** 8 September 2026 — 143 tier and gate cases, 8 region cases, 4 localisation
 cases, and the full loop end to end across all three smoke legs
 
 > **New to this project, or a fresh session?** Read **section 3c** first. It is the current state of
@@ -374,25 +374,48 @@ the Director had no way to tell that from a peninsula in the middle of a campaig
 on both readings alike. Worse, it could not observe whether a ruler had ever acted on what it granted
 — which means every magnitude in `momentum.js` and `moments.js` was a dial nobody could read.
 
-**What the mod now emits.** One record per war, from the attacker's side only, inside the same
+**What the mod now emits.** One record per war, per belligerent inside the sphere, from the same
 per-realm loop that already writes the realm lines:
 
 ```
-HD:/;/war/;/<attacker id>/;/<defender id>/;/<war name>
+HD:/;/war/;/<war id>/;/<attacker id>/;/<defender id>/;/<war name>
 ```
 
-Reporting from one side means each war appears once instead of twice. The cost is that a war whose
-attacker sits outside the sphere goes unseen even when its defender is inside it; the sphere already
-bounds perception everywhere else, and de-duplicating in script would buy a second pass for nothing.
+**The first version of this did not work, and the way it failed is the point.** It reported from the
+attacker's side only — `save_scope_as = hd_belligerent`, then a filtered `every_character_war`, then
+`[scope:hd_belligerent.Char.GetID]` to read it back. Every name in it had been checked against the
+game files first: `every_character_war` (88 uses), `primary_attacker` as a war-scope trigger (584),
+`primary_defender` as a scope link in effect context (`00_prison_interactions.txt`,
+`war_on_actions.txt`), the `.War.` cast from `core_l_english.yml:544`.
 
-**Every name in that script was checked against the game files before it was written**, because an
-unknown data function inside a quoted `debug_log` yields an unparseable line rather than an error —
-the same failure class that once meant snapshots never arrived at all. `every_character_war` (88
-uses), `primary_attacker` as a war-scope trigger (584), `primary_defender` as a scope link in effect
-context (`00_prison_interactions.txt`, `war_on_actions.txt`), and the `.War.` cast from
-`core_l_english.yml:544`. `GetPrimaryAttacker` and `GetPrimaryDefender` do not exist anywhere in
-`gui/`, `common/` or `events/`, which is why the defender is reached by scope rather than
-interpolated.
+Thirty records came back on the first live snapshot, and every one of them read:
+
+```
+HD:/;/war/;/ERROR:[scope:hd_belligerent.Char.GetID]/;/16820178/;/ERROR:[scope:hd_war.War.GetName]
+```
+
+The defender resolved. Both `scope:` references did not. **A `scope:` reference resolves in script —
+the toolkit's own actions depend on it and have always worked — but not inside the data-function
+interpolation of a quoted `debug_log` run from a batch file, where there is no event to hold the
+saved scope.** Only `THIS`, the current scope, is addressable there. Verifying that a *function*
+exists says nothing about whether the *scope it is called on* will be reachable, and those are two
+separate checks.
+
+Two things followed. First, every field is now read off the war itself — `[THIS.War.GetID]`,
+`[THIS.War.GetActiveCB.GetAttacker.GetID]`, `[THIS.War.GetActiveCB.GetDefender.GetID]`,
+`[THIS.War.GetName]` — with no saved scope anywhere in the emit. `GetActiveCB.GetAttacker` and
+`GetActiveCB.GetDefender` have 22 uses each; `War.GetID` is `window_ledger.gui:4864`.
+
+Second, dropping the attacker-side filter means each war is emitted once per belligerent in the
+sphere. That duplicate is collapsed on the war id in `WorldState`, and it is **strictly better than
+what it replaced**: a war now reaches the Director if *either* side is inside the sphere, where the
+filtered version made a whole war invisible whenever its attacker sat outside.
+
+**And the failure was legible, which is the only reason this took ten minutes.** CK3 wrote
+`ERROR:[...]` into the field rather than dropping the line or emitting silence. The parser now
+requires all three ids to be finite before it keeps a record, so an `ERROR:` field yields no war
+rather than a war between nobody — a war nobody can identify is worse than no war, because it would
+read as a fact.
 
 **The guard that follows from it.** `grant_claim` and `historical_moment` now refuse a pair already at
 war with each other. A pressed claim cannot start a war against someone you are already fighting, so
@@ -412,6 +435,9 @@ the same question one step later:
 ```
 snapshot received: 5 realms in 1218.4.2; 1 war under way: the banu zahir Empire -> Kingdom of Navarra
 ```
+
+That line is also the check. A snapshot of 193 realms across twenty regions that reports no wars is
+not a quiet world; it is a broken emit, and the first version said exactly that by saying nothing.
 
 **Orchestrator-side only.** `snapshotScript` is generated into `run/hd.txt` and executed by the mod's
 existing pump, so this is **no mod change, no redeploy, no CK3 restart** — restarting `npm start` is

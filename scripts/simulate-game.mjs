@@ -79,7 +79,11 @@ const SCENARIOS = {
     // rather than only the empty case. Navarra is the smallest realm on the
     // board and is being invaded by the largest: the Director should be able to
     // see that before it offers anyone a claim on Pamplona.
-    wars: [[3001, 3002, 'Conquest of Navarra']],
+    //
+    // Keyed by war id, because the real script emits one record per belligerent
+    // in the sphere and both of these are in it. The duplicate is the point:
+    // the parser has to collapse it.
+    wars: [[4001, 3001, 3002, 'Conquest of Navarra']],
   },
 };
 
@@ -128,11 +132,13 @@ function emitSnapshot(token) {
       }
     }
   }
-  // Wars, emitted after the realms exactly as the mod does: the real script
-  // reports them from inside the same per-realm loop that writes the realm
-  // lines, one record per war, from the attacker's side only.
-  for (const [attacker, defender, name] of scenario.wars ?? []) {
-    emit(`HD:/;/war/;/${attacker}/;/${defender}/;/${name}`);
+  // Wars, emitted exactly as the mod does: from inside the same per-realm loop
+  // that writes the realm lines, once for every belligerent that is in the
+  // sphere. Both sides are in these scenarios, so each war is emitted twice and
+  // the parser is made to collapse it - which is the behaviour the real game
+  // produces, and the reason the record carries a war id at all.
+  for (const [id, attacker, defender, name] of scenario.wars ?? []) {
+    for (const _ of [attacker, defender]) emit(`HD:/;/war/;/${id}/;/${attacker}/;/${defender}/;/${name}`);
   }
   emit(`HD:/;/snapshot_end/;/${token}`);
   const wars = (scenario.wars ?? []).length;

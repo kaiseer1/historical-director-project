@@ -33,8 +33,8 @@ export class SnapshotAssembler {
           realms: [],
           /** @type {Map<number, string[]>} filled before the realms exist */
           regionsById: new Map(),
-          /** @type {Array<{attacker: number, defender: number, name: string}>} */
-          wars: [],
+          /** @type {Map<number, {id: number, attacker: number, defender: number, name: string}>} */
+          warsById: new Map(),
         };
         return null;
 
@@ -158,11 +158,23 @@ export class SnapshotAssembler {
         // Who is fighting whom, and what the game calls it. Buffered with the
         // rest of the snapshot rather than returned as an event, because a war
         // is context for the next audit and never a trigger for one.
+        //
+        // The same war arrives once per belligerent inside the sphere, so it is
+        // keyed on the war's own id. That is deliberate on the emitting side:
+        // reporting from both sides is what lets a war be seen when only one of
+        // its belligerents is somewhere the Director is looking.
+        //
+        // A field the game could not resolve comes through as the literal
+        // "ERROR:[...]" rather than as a failure, so every id is checked before
+        // the record is kept. A war nobody can identify is worse than no war,
+        // because it would read as a fact.
         if (!this.pending) return null;
-        const attacker = Number(rec.fields[0]);
-        const defender = Number(rec.fields[1]);
-        if (Number.isFinite(attacker) && Number.isFinite(defender)) {
-          this.pending.wars.push({ attacker, defender, name: rec.fields[2] ?? '' });
+        const id = Number(rec.fields[0]);
+        const attacker = Number(rec.fields[1]);
+        const defender = Number(rec.fields[2]);
+        if (!Number.isFinite(id) || !Number.isFinite(attacker) || !Number.isFinite(defender)) return null;
+        if (!this.pending.warsById.has(id)) {
+          this.pending.warsById.set(id, { id, attacker, defender, name: rec.fields[3] ?? '' });
         }
         return null;
       }
@@ -198,7 +210,7 @@ export class SnapshotAssembler {
  * @param {{token: string, date: string, totalDays: number, playerId: number, realms: any[]}} snap
  */
 function finalise(snap) {
-  const wars = snap.wars ?? [];
+  const wars = [...(snap.warsById ?? new Map()).values()];
   const realmsById = new Map(snap.realms.map((r) => [r.id, r]));
 
   // Geography, attached now that every realm exists. Buffered on the way in

@@ -2230,6 +2230,9 @@ const stage = (moment, st) => validateProposal({ action: 'historical_moment', ar
 // Leon sat at 16 and 14 counties from July 1205 to March 1206 and the Director
 // read a peninsula mid-campaign as a peninsula at rest.
 
+/** Castile attacking Leon, in the four-field shape the mod emits. */
+const WAR = 'HD:/;/war/;/501/;/11/;/12/;/Claim on the Kingdom of Leon';
+
 /** A snapshot with two realms and whatever wars a case needs. */
 function snapshotWithWars(warLines = []) {
   const a = new SnapshotAssembler();
@@ -2251,7 +2254,7 @@ function snapshotWithWars(warLines = []) {
 }
 
 {
-  const snap = snapshotWithWars(['HD:/;/war/;/11/;/12/;/Claim on the Kingdom of Leon']);
+  const snap = snapshotWithWars([WAR]);
   check(
     'W1. a war reported over the wire reaches the snapshot',
     snap.wars.length === 1 && snap.wars[0].attacker === 11 && snap.wars[0].defender === 12
@@ -2261,9 +2264,37 @@ function snapshotWithWars(warLines = []) {
 }
 
 {
+  // The same war arrives once per belligerent inside the sphere, by design:
+  // emitting from both sides is what lets a war be seen when only one of its
+  // belligerents is somewhere the Director is looking. The war id is what makes
+  // that affordable.
+  const snap = snapshotWithWars([WAR, WAR]);
+  check(
+    'W1b. the same war reported from both sides is counted once',
+    snap.wars.length === 1,
+    `${snap.wars.length} war(s) after two records for war 501`,
+  );
+}
+
+{
+  // A field the game cannot resolve comes back as the literal "ERROR:[...]"
+  // rather than as a failure - which is exactly what the first version of this
+  // script produced, thirty times, before anyone knew it had. A war nobody can
+  // identify is worse than no war, because it would read as a fact.
+  const snap = snapshotWithWars([
+    'HD:/;/war/;/502/;/ERROR:[scope:hd_belligerent.Char.GetID]/;/12/;/ERROR:[scope:hd_war.War.GetName]',
+  ]);
+  check(
+    'W1c. a record the game could not fill in is dropped, not half-believed',
+    snap.wars.length === 0,
+    JSON.stringify(snap.wars),
+  );
+}
+
+{
   // Direction-insensitive: the question is whether these two are fighting, and
   // which of them declared does not change the answer.
-  const snap = snapshotWithWars(['HD:/;/war/;/11/;/12/;/Claim on the Kingdom of Leon']);
+  const snap = snapshotWithWars([WAR]);
   check(
     'W2. warBetween answers in either direction, and stays silent otherwise',
     snap.warBetween(11, 12) !== null && snap.warBetween(12, 11) !== null && snap.warBetween(11, 99) === null,
@@ -2275,7 +2306,7 @@ function snapshotWithWars(warLines = []) {
   // The reason this was built. A claim cannot start a war against someone you
   // are already fighting, so the claim sits idle - but 1000 gold, 1000 prestige
   // and a 30-year war modifier land immediately, on a belligerent, mid-campaign.
-  const snap = snapshotWithWars(['HD:/;/war/;/11/;/12/;/Claim on the Kingdom of Leon']);
+  const snap = snapshotWithWars([WAR]);
   const r = validateProposal(
     { action: 'grant_claim', args: { actor: 11, target: 12, momentum: 'none' } },
     snap,
@@ -2289,7 +2320,7 @@ function snapshotWithWars(warLines = []) {
 }
 
 {
-  const snap = snapshotWithWars(['HD:/;/war/;/12/;/11/;/Claim on the Kingdom of Castile']);
+  const snap = snapshotWithWars(['HD:/;/war/;/503/;/12/;/11/;/Claim on the Kingdom of Castile']);
   const r = validateProposal(
     { action: 'historical_moment', args: { moment: 'iberian_union', actor: 11, target: 12 } },
     snap,
@@ -2305,7 +2336,7 @@ function snapshotWithWars(warLines = []) {
 {
   // The guard must not become a blanket refusal. A war elsewhere says nothing
   // about this pair.
-  const snap = snapshotWithWars(['HD:/;/war/;/11/;/77/;/Claim on somewhere else']);
+  const snap = snapshotWithWars(['HD:/;/war/;/504/;/11/;/77/;/Claim on somewhere else']);
   const r = validateProposal(
     { action: 'historical_moment', args: { moment: 'iberian_union', actor: 11, target: 12 } },
     snap,
@@ -2340,8 +2371,8 @@ function snapshotWithWars(warLines = []) {
   // A ruler fighting on two fronts is not short of a casus belli, and the
   // prompt says so per realm rather than making the model scan the list.
   const snap = snapshotWithWars([
-    'HD:/;/war/;/11/;/12/;/Claim on the Kingdom of Leon',
-    'HD:/;/war/;/77/;/11/;/Claim on the Kingdom of Castile',
+    WAR,
+    'HD:/;/war/;/505/;/77/;/11/;/Claim on the Kingdom of Castile',
   ]);
   check(
     'W7. warsOf finds a realm on both sides of the list',
@@ -2357,10 +2388,11 @@ function snapshotWithWars(warLines = []) {
   // than an error - the failure class that once meant snapshots never arrived.
   const lines = snapshotScript(['world_europe_west_iberia'], 90, ['world_europe_west_iberia']).join('\n');
   check(
-    'W8. the snapshot script emits wars from the attacker, once each',
+    'W8. the snapshot script reads every war field off the war itself',
     /every_character_war = \{/.test(lines)
-      && /limit = \{ primary_attacker = scope:hd_belligerent \}/.test(lines)
-      && /HD:\/;\/war\/;\/\[scope:hd_belligerent\.Char\.GetID\]\/;\/\[THIS\.Char\.GetID\]\/;\/\[scope:hd_war\.War\.GetName\]/.test(lines),
+      && !/save_scope_as = hd_belligerent/.test(lines)
+      && !/scope:hd_war/.test(lines)
+      && /HD:\/;\/war\/;\/\[THIS\.War\.GetID\]\/;\/\[THIS\.War\.GetActiveCB\.GetAttacker\.GetID\]\/;\/\[THIS\.War\.GetActiveCB\.GetDefender\.GetID\]\/;\/\[THIS\.War\.GetName\]/.test(lines),
     lines.split('\n').filter((l) => /war/i.test(l)).map((l) => l.trim()).join(' | ').slice(0, 200) || 'no war lines emitted',
   );
 }

@@ -252,7 +252,7 @@ export function snapshotScript(regions, token, homeRegions = [], nearRegions = [
     '\t\tdebug_log = "HD:/;/realm_near/;/[THIS.Char.GetID]"',
     '\t\tremove_variable = hd_near',
     '\t}',
-    // Wars this realm has started.
+    // Wars this realm is fighting, on either side.
     //
     // The Director could see every realm's rank, size, culture, faith and
     // geography, and not that two of them were already fighting. So it could
@@ -261,18 +261,24 @@ export function snapshotScript(regions, token, homeRegions = [], nearRegions = [
     // moments.js was a dial nobody could read. County counts only reveal a war
     // once it has been won.
     //
-    // Reported from the attacker's side alone, so each war appears once instead
-    // of twice. A war whose attacker sits outside the sphere therefore goes
-    // unseen even when its defender is inside it: the sphere already bounds
-    // perception everywhere else, and de-duplicating in script would cost a
-    // second pass for nothing.
-    '\tsave_scope_as = hd_belligerent',
+    // No saved scopes anywhere in here, and that is the whole design. The first
+    // attempt reported from the attacker's side using `save_scope_as` and read
+    // it back with `[scope:hd_belligerent.Char.GetID]`; the game answered
+    // "ERROR:[scope:hd_belligerent.Char.GetID]" on every one of thirty records.
+    // A `scope:` reference resolves in script - the toolkit's own actions rely
+    // on it - but not in the data-function interpolation inside a quoted
+    // debug_log run from a batch file, where there is no event to hold the
+    // scope. Only the current scope, THIS, is addressable.
+    //
+    // So every field is read off the war itself, and the war is emitted once
+    // per belligerent in the sphere rather than once per war. That is a
+    // duplicate by construction, keyed on the war id and dropped in
+    // WorldState - which is cheaper than it sounds and strictly better than the
+    // attacker-only filter it replaces: a war now reaches us if EITHER side is
+    // inside the sphere, where before an attacker outside it made the whole war
+    // invisible.
     '\tevery_character_war = {',
-    '\t\tlimit = { primary_attacker = scope:hd_belligerent }',
-    '\t\tsave_scope_as = hd_war',
-    '\t\tprimary_defender = {',
-    '\t\t\tdebug_log = "HD:/;/war/;/[scope:hd_belligerent.Char.GetID]/;/[THIS.Char.GetID]/;/[scope:hd_war.War.GetName]"',
-    '\t\t}',
+    '\t\tdebug_log = "HD:/;/war/;/[THIS.War.GetID]/;/[THIS.War.GetActiveCB.GetAttacker.GetID]/;/[THIS.War.GetActiveCB.GetDefender.GetID]/;/[THIS.War.GetName]"',
     '\t}',
     '\tremove_variable = hd_counties',
     '\tchange_global_variable = { name = hd_idx add = 1 }',
