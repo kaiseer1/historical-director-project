@@ -446,6 +446,10 @@ function approve({ id }) {
 
   loreBook.record({
     date: p.date, year: p.year, verdict: 'approved', action: p.action,
+    // The arguments, not only the sentence. Names in the summary cannot identify
+    // a character across a reign - CK3 renders nicknames into them and those
+    // change - so the ledger stores the ids the proposal actually used.
+    args: p.args,
     summary: p.preview, rationale: p.divergence, sources: p.sources,
     // The card's prose, kept with the verdict. It is the readable half of what
     // the player was looking at when they decided, and the ledger is thin
@@ -466,6 +470,10 @@ function decline({ id }) {
 
   loreBook.record({
     date: p.date, year: p.year, verdict: 'declined', action: p.action,
+    // The arguments, not only the sentence. Names in the summary cannot identify
+    // a character across a reign - CK3 renders nicknames into them and those
+    // change - so the ledger stores the ids the proposal actually used.
+    args: p.args,
     summary: p.preview, rationale: p.divergence, sources: p.sources,
     narrative: p.narrative ?? '',
   });

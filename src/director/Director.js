@@ -164,6 +164,18 @@ export class Director {
         this.log(`rejected proposal - ${check.error}`);
         continue;
       }
+      // Has this exact action against these exact characters already been
+      // approved? A guard rather than a prompt rule, because the prompt rule for
+      // declines worked and the absence of one for approvals let the Director
+      // re-propose its own work five times over - and each repeat poured another
+      // war chest into the same realm.
+      const repeat = this.loreBook.approvedMatch(p.action, p.args, year);
+      if (repeat) {
+        rejected.push(`${p.action}: already approved on ${repeat.date}; a pressed claim already held is a no-op, but the momentum granted with it is not`);
+        this.log(`rejected proposal - already approved on ${repeat.date}`);
+        continue;
+      }
+
       // At most one demotion per audit. The model reaches for adjust_title_tier
       // because it is the bluntest verb available and reads as decisive, and two
       // dissolutions approved in one sitting can take a region apart faster than
@@ -346,6 +358,7 @@ export class Director {
     ].join('\n');
 
     const declined = this.loreBook.declinedSummaries();
+    const approved = this.loreBook.approvedSummaries();
 
     const briefing = bookmarkBriefing(snapshot.year, this.baseline?.capturedYear ?? 0);
 
@@ -369,6 +382,9 @@ export class Director {
       '## Ledger of prior judgements',
       this.loreBook.asPromptContext(),
       declined.length ? `\nAlready declined by the player, do not raise again:\n- ${declined.join('\n- ')}` : '',
+      approved.length
+        ? `\nAlready DONE and in force. Do not propose any of these again: the change is already in the world, and repeating it adds nothing but a second war chest.\n- ${approved.join('\n- ')}`
+        : '',
     ].join('\n');
 
     const response = await this.llm.completeJson([

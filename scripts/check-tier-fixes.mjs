@@ -17,11 +17,13 @@ import { parseLine } from '../src/bridge/protocol.js';
 import { Baseline } from '../src/model/Baseline.js';
 import { AuditClock } from '../src/model/AuditClock.js';
 import { validateProposal } from '../src/director/toolkit.js';
+import { Director } from '../src/director/Director.js';
 import { momentumScript, MOMENTUM_KEYS, setMomentumSupport } from '../src/director/momentum.js';
 import { compareVersions, deployedModVersion, momentumSupport, macroSupport, momentSupport as resolveMomentSupport, MACRO_MIN_MOD, MOMENT_MIN_MOD, setObservedModVersion, observedModVersion } from '../src/setup/modVersion.js';
 import { setMacroSupport } from '../src/director/macroEvents.js';
 import { MOMENTS, MOMENT_KEYS, ALL_MOMENT_KEYS, setMomentSupport } from '../src/director/moments.js';
 import { preflight } from '../src/setup/preflight.js';
+import { LoreBook } from '../src/lore/LoreBook.js';
 import { INTENSITY, INTENSITY_KEYS, intensityBand, hasRegionData } from '../src/director/macroEvents.js';
 
 let passed = 0;
@@ -1848,7 +1850,124 @@ function deployedAt(version) {
   );
 }
 
-try { fs.unlinkSync(tmp); } catch { /* already gone */ }
+// --- the Director re-proposing its own work ---------------------------------
+// The prompt was handed a "do not raise again" list built only from declines,
+// so approvals were never suppressed. A live campaign approved Alfonso VIII's
+// claim on Leon in 1193, 1199, 1200, 1201 and 1205, and the same claim on
+// Calatayud twice in six months - 28 of 34 ledger entries were approvals and a
+// large share were repeats.
+//
+// The redundant half is harmless: a pressed claim already held is a no-op. The
+// momentum granted with it is not. Every repeat added another thousand gold,
+// another thousand prestige and a fresh thirty-year appetite for war, so the
+// duplicates compounded into the kind of distorted map the Director exists to
+// correct.
 
-console.log(`\n${passed} passed, ${failed} failed\n`);
-process.exit(failed === 0 ? 0 : 1);
+/** A ledger in a scratch file. */
+function ledger() {
+  const f = path.join(os.tmpdir(), 'hd-ledger-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.json');
+  return { book: new LoreBook(f), file: f };
+}
+
+{
+  const { book, file } = ledger();
+  book.record({ date: '2 Jan 1199', year: 1199, verdict: 'approved', action: 'grant_claim', args: { actor: 1, target: 2, momentum: 'reconquista' }, summary: 'Alfonso -> Leon' });
+
+  // The live case exactly: same pair, different momentum, six years later.
+  const repeat = book.approvedMatch('grant_claim', { actor: 1, target: 2, momentum: 'succession_pressure' }, 1205);
+  check(
+    'D1. the same action against the same pair is caught, whatever momentum it carries',
+    repeat !== null && repeat.date === '2 Jan 1199',
+    repeat ? 'matched the approval of ' + repeat.date : 'MISSED, which is the live bug',
+  );
+  fs.rmSync(file, { force: true });
+}
+
+{
+  const { book, file } = ledger();
+  book.record({ date: '2 Jan 1199', year: 1199, verdict: 'approved', action: 'grant_claim', args: { actor: 1, target: 2 }, summary: 'x' });
+  check(
+    'D2. a different target is not a repeat',
+    book.approvedMatch('grant_claim', { actor: 1, target: 9 }, 1205) === null,
+    'the guard identifies the pair, not the action alone',
+  );
+  check(
+    'D3. and a different action against the same pair is not a repeat',
+    book.approvedMatch('set_relations', { actor: 1, target: 2 }, 1205) === null,
+    'grant_claim and set_relations are different things to have done',
+  );
+  fs.rmSync(file, { force: true });
+}
+
+{
+  const { book, file } = ledger();
+  book.record({ date: '2 Jan 1199', year: 1199, verdict: 'approved', action: 'grant_claim', args: { actor: 1, target: 2 }, summary: 'x' });
+  check(
+    'D4. the suppression expires, so a changed situation is judged again',
+    book.approvedMatch('grant_claim', { actor: 1, target: 2 }, 1206) !== null
+      && book.approvedMatch('grant_claim', { actor: 1, target: 2 }, 1240) === null,
+    'blocked seven years later, allowed forty-one years later',
+  );
+  fs.rmSync(file, { force: true });
+}
+
+{
+  const { book, file } = ledger();
+  book.record({ date: '2 Jan 1199', year: 1199, verdict: 'declined', action: 'grant_claim', args: { actor: 1, target: 2 }, summary: 'x' });
+  check(
+    'D5. a decline never blocks - that is the other list\'s job',
+    book.approvedMatch('grant_claim', { actor: 1, target: 2 }, 1205) === null,
+    'declines are suppressed by instruction, approvals by this guard',
+  );
+  fs.rmSync(file, { force: true });
+}
+
+{
+  // Entries written before arguments were recorded carry none, and cannot be
+  // matched this way. They are covered by the prompt instruction instead, which
+  // is why both halves exist.
+  const { book, file } = ledger();
+  book.record({ date: '2 Jan 1199', year: 1199, verdict: 'approved', action: 'grant_claim', summary: 'a legacy entry with no args' });
+  check(
+    'D6. a legacy entry without arguments cannot be matched, and says nothing false',
+    book.approvedMatch('grant_claim', { actor: 1, target: 2 }, 1205) === null
+      && book.approvedSummaries().length === 1,
+    'unmatched by the guard, still named in the instruction',
+  );
+  fs.rmSync(file, { force: true });
+}
+
+{
+  // The whole point: the guard runs inside audit, so a repeat never reaches the
+  // player at all. Exercised through the real Director with a stub model.
+  const { book, file } = ledger();
+  book.record({ date: '2 Jan 1199', year: 1199, verdict: 'approved', action: 'grant_claim', args: { actor: 1, target: 2 }, summary: 'Alfonso -> Leon' });
+
+  const snap = snapshot({
+    token: '80', date: '1205.1.1', totalDays: 439000,
+    realms: [
+      { id: 1, ruler: 'Alfonso VIII', title: 'Kingdom of Castile', rank: 'Kingdom', tierKey: 'kingdom' },
+      { id: 2, ruler: 'Fernando III', title: 'Kingdom of Leon', rank: 'Kingdom', tierKey: 'kingdom' },
+    ],
+  });
+
+  const director = new Director({
+    llm: { completeJson: async () => ({ assessment: '', proposals: [{ action: 'grant_claim', args: { actor: 1, target: 2 }, headline: 'again' }] }) },
+    loreBook: book,
+    knowledge: { enabled: false },
+    log: () => {},
+  });
+
+  director.audit(snap, ['world_europe_west_iberia']).then((r) => {
+    check(
+      'D7. a repeat is dropped inside audit and never reaches the player',
+      r.proposals.length === 0 && r.rejected.some((x) => /already approved on 2 Jan 1199/.test(x)),
+      r.proposals.length ? 'REACHED the player, which is the bug' : r.rejected[0],
+    );
+    fs.rmSync(file, { force: true });
+    console.log('\n' + passed + ' passed, ' + failed + ' failed\n');
+    process.exit(failed === 0 ? 0 : 1);
+  });
+}
+
+try { fs.unlinkSync(tmp); } catch { /* already gone */ }
