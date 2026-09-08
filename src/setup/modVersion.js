@@ -42,6 +42,17 @@ export const MOMENTUM_MIN_MOD = '0.4.0';
 export const MACRO_MIN_MOD = '0.4.3';
 
 /**
+ * The mod version that first defined the historical moment library: the
+ * hd_event.0210 chain and the hd_moment_* modifiers.
+ *
+ * A third threshold rather than a bump of the second, because the two features
+ * are independent: a 0.4.3 mod can run Iberian pressure perfectly well and has
+ * no moment content at all. Collapsing them would refuse a working feature to
+ * protect a different one.
+ */
+export const MOMENT_MIN_MOD = '0.5.0';
+
+/**
  * Compare two dotted version strings numerically.
  * @returns {number} negative when a < b, 0 when equal, positive when a > b
  */
@@ -112,6 +123,16 @@ function featureSupport(ck3UserFolder, minVersion, feature, defines) {
 /** @param {string} ck3UserFolder */
 export function momentumSupport(ck3UserFolder) {
   return featureSupport(ck3UserFolder, MOMENTUM_MIN_MOD, 'momentum', 'the modifiers it applies');
+}
+
+/** @param {string} ck3UserFolder */
+export function momentSupport(ck3UserFolder) {
+  return featureSupport(
+    ck3UserFolder,
+    MOMENT_MIN_MOD,
+    'the historical moment library',
+    'its events and modifiers',
+  );
 }
 
 /**

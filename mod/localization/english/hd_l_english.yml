@@ -54,3 +54,14 @@
  hd_press_iberian_union_decision_desc:0 "The accords sworn during the pressure gave this house standing it did not have before. Standing can be spent. A claim pressed now against a neighbour would be heard, where a year ago it would have been laughed at."
  hd_press_iberian_union_decision_tooltip:0 "Gain a pressed claim on a neighbouring ruler's primary title."
  hd_press_iberian_union_decision_confirm:0 "Let the lawyers begin."
+
+ hd_moment_union:0 "A Crown Drawing Together"
+ hd_moment_decline:0 "A Power Coming Apart"
+
+ hd_event.0210.t:0 "The Question of the Two Crowns"
+ hd_event.0210.desc:0 "The lawyers have finished, and what they have produced is not a conquest but a genealogy. Set out on the table, the descents run together often enough that the two crowns have a case for being one crown that was carelessly divided.\n\nThe case will not argue itself, and the other court will not concede it. But the argument now exists, it is written down, and there is money enough to put an army behind it if it comes to that."
+ hd_event.0210.a:0 "Then let it be heard."
+
+ hd_event.0211.t:0 "The Cracks Run Deep"
+ hd_event.0211.desc:0 "Word comes from the south faster than it can be checked, and all of it says the same thing. Garrisons unpaid, governors ruling in their own names, tax that leaves a province and never arrives. Whatever held that power together is not holding it any more.\n\nWhat is coming apart down there will be divided by whoever is standing closest when it finishes. We are standing close."
+ hd_event.0211.a:0 "Then we had better be ready."

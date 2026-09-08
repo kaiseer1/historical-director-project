@@ -20,9 +20,10 @@ import { preflight, problemCount } from './setup/preflight.js';
 // Two similarly named things, kept apart on purpose: modVersion's resolves the
 // answer by reading the deployed descriptor, momentum's reports the answer the
 // toolkit is currently acting on.
-import { momentumSupport as resolveMomentumSupport, macroSupport as resolveMacroSupport } from './setup/modVersion.js';
+import { momentumSupport as resolveMomentumSupport, macroSupport as resolveMacroSupport, momentSupport as resolveMomentSupport } from './setup/modVersion.js';
 import { setMomentumSupport, momentumSupport as momentumSupportState } from './director/momentum.js';
 import { setMacroSupport, macroSupport as macroSupportState } from './director/macroEvents.js';
+import { setMomentSupport, momentSupport as momentSupportState } from './director/moments.js';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -474,6 +475,11 @@ function macroState() {
   return { ok: m.ok, version: m.version, reason: m.reason, checked: m.checked };
 }
 
+function momentState() {
+  const m = momentSupportState();
+  return { ok: m.ok, version: m.version, reason: m.reason, checked: m.checked };
+}
+
 function publicState() {
   return {
     connected: state.connected,
@@ -502,6 +508,7 @@ function publicState() {
       sphereReach: cfg.director.sphereReach,
       momentum: momentumState(),
       macro: macroState(),
+      moment: momentState(),
       sphereMax: cfg.director.sphereMax,
       maxRealmsInPrompt: cfg.director.maxRealmsInPrompt,
       knowledge: cfg.knowledge.enabled,
@@ -593,15 +600,19 @@ function checkModCapabilities() {
   const macro = resolveMacroSupport(cfg.ck3UserFolder);
   setMacroSupport(macro);
 
-  const version = mom.version ?? macro.version;
-  if (mom.ok && macro.ok) {
-    log(`companion mod v${version} deployed; momentum and macro events available`);
+  const moment = resolveMomentSupport(cfg.ck3UserFolder);
+  setMomentSupport(moment);
+
+  const version = mom.version ?? macro.version ?? moment.version;
+  if (mom.ok && macro.ok && moment.ok) {
+    log(`companion mod v${version} deployed; momentum, macro events and the moment library available`);
   } else {
     if (version) log(`companion mod v${version} deployed`);
     if (!mom.ok) log(`momentum unavailable: ${mom.reason}`);
     if (!macro.ok) log(`macro events unavailable: ${macro.reason}`);
+    if (!moment.ok) log(`historical moments unavailable: ${moment.reason}`);
   }
-  return { momentum: mom, macro };
+  return { momentum: mom, macro, moment };
 }
 
 /**

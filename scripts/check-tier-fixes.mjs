@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { SnapshotAssembler, renderRealmTable } from '../src/model/WorldState.js';
 import { parseLine } from '../src/bridge/protocol.js';
 import { Baseline } from '../src/model/Baseline.js';
@@ -19,6 +20,7 @@ import { validateProposal } from '../src/director/toolkit.js';
 import { momentumScript, MOMENTUM_KEYS, setMomentumSupport } from '../src/director/momentum.js';
 import { compareVersions, deployedModVersion, momentumSupport, macroSupport, MACRO_MIN_MOD } from '../src/setup/modVersion.js';
 import { setMacroSupport } from '../src/director/macroEvents.js';
+import { MOMENTS, MOMENT_KEYS, ALL_MOMENT_KEYS, setMomentSupport } from '../src/director/moments.js';
 import { preflight } from '../src/setup/preflight.js';
 import { INTENSITY, INTENSITY_KEYS, intensityBand, hasRegionData } from '../src/director/macroEvents.js';
 
@@ -63,6 +65,8 @@ function snapshot({ token = '1', date = '1066.9.15', totalDays = 389_000, realms
   }
   return feed(`HD:/;/snapshot_end/;/${token}`).snapshot;
 }
+
+const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const tmp = path.join(os.tmpdir(), `hd-baseline-${Date.now()}.json`);
 const fresh = () => {
@@ -1599,6 +1603,152 @@ function baselineAcross(year, sphere, realms) {
     'S5. and the Holy Roman Empire is still refused by name',
     !r.ok && /nothing to bring down/.test(r.error),
     r.ok ? 'ACCEPTED, which reopens failure B through the new door' : r.error,
+  );
+}
+
+// --- the historical moment library ------------------------------------------
+// A moment licenses and equips; it transfers no titles and starts no wars. The
+// claim is the mechanism because a pressed claim on a kingdom-tier title
+// carries the de jure vassals on victory - that is a union - and claim_cb is
+// not one of the four vanilla CBs that call
+// struggle_blocks_invasion_conquest_cb_trigger, so the Iberian struggle does
+// not touch it in any phase.
+
+/** Two Iberian crowns, with the per-realm geography a moment requires. */
+function crowns({ actorRegion = 'world_europe_west_iberia', targetRegion = 'world_europe_west_iberia', year = 1205 } = {}) {
+  return {
+    year,
+    realmsById: new Map([
+      [1, { id: 1, tag: 0, ruler: 'Alfonso VIII', primaryTitle: 'Kingdom of Castile', tierKey: 'kingdom', culture: 'Castilian', inNeighbourhood: true, regions: [actorRegion] }],
+      [2, { id: 2, tag: 1, ruler: 'Alfonso IX', primaryTitle: 'Kingdom of Leon', tierKey: 'kingdom', culture: 'Castilian', inNeighbourhood: true, regions: [targetRegion] }],
+    ]),
+  };
+}
+
+const moment = (args, st) => validateProposal({ action: 'historical_moment', args }, st, null);
+
+{
+  const r = moment({ moment: 'iberian_union', actor: 1, target: 2 }, crowns());
+  check(
+    'H1. a curated moment validates, and the preview itemises what it grants',
+    r.ok
+      && /pressed claim/.test(r.preview)
+      && /600 gold/.test(r.preview)
+      && /25-year/.test(r.preview)
+      && /No war is started and no title changes hands/.test(r.preview),
+    r.ok ? r.preview.slice(0, 130) + '...' : r.error,
+  );
+}
+
+{
+  // The date. A moment outside its window is a different process wearing its
+  // name; almohad_decline is 1212 give or take 60.
+  const r = moment({ moment: 'almohad_decline', actor: 1, target: 2 }, crowns({ year: 900 }));
+  check(
+    'H2. a moment outside its window is refused, and the refusal shows the arithmetic',
+    !r.ok && /belongs to 1212 give or take 60 years, and the campaign is at 900/.test(r.error),
+    r.ok ? 'ACCEPTED nine centuries early' : r.error,
+  );
+}
+
+{
+  // The place. Both realms must hold land where the moment happened.
+  const r = moment({ moment: 'iberian_union', actor: 1, target: 2 }, crowns({ targetRegion: 'world_khorasan' }));
+  check(
+    'H3. a realm outside the moment\'s region is refused by name',
+    !r.ok && /Kingdom of Leon does not hold land where/.test(r.error),
+    r.ok ? 'ACCEPTED in Khorasan' : r.error,
+  );
+}
+
+{
+  // Declared but not curated. abbasid_twilight is in the table and must not be
+  // reachable, because its actor is genuinely ambiguous.
+  const r = moment({ moment: 'abbasid_twilight', actor: 1, target: 2 }, crowns());
+  check(
+    'H4. a declared but unoffered moment cannot be chosen',
+    !r.ok && /is not an offered moment/.test(r.error)
+      && ALL_MOMENT_KEYS.includes('abbasid_twilight')
+      && !MOMENT_KEYS.includes('abbasid_twilight'),
+    'declared in the table, absent from the enum the model sees',
+  );
+}
+
+{
+  const r = moment({ moment: 'iberian_union', actor: 1, target: 1 }, crowns());
+  check(
+    'H5. a realm cannot be both subject and object',
+    !r.ok && /subject and the object/.test(r.error),
+    r.error,
+  );
+}
+
+{
+  // Snapshots without per-realm geography cannot confirm either realm belongs
+  // to the moment, so the action is refused rather than guessed at.
+  const blind = {
+    year: 1205,
+    realmsById: new Map([
+      [1, { id: 1, tag: 0, ruler: 'A', primaryTitle: 'Kingdom of Castile', tierKey: 'kingdom', inNeighbourhood: true }],
+      [2, { id: 2, tag: 1, ruler: 'B', primaryTitle: 'Kingdom of Leon', tierKey: 'kingdom', inNeighbourhood: true }],
+    ]),
+  };
+  const r = moment({ moment: 'iberian_union', actor: 1, target: 2 }, blind);
+  check(
+    'H6. a snapshot without geography refuses rather than assumes',
+    !r.ok && /carries no per-realm geography/.test(r.error),
+    r.error,
+  );
+}
+
+{
+  // The version gate, on its own threshold. A 0.4.3 mod runs Iberian pressure
+  // perfectly well and has none of this library's content.
+  setMomentSupport({ ok: false, version: '0.4.3', reason: 'the deployed companion mod is v0.4.3 and the historical moment library needs v0.5.0 or newer' });
+  const stale = moment({ moment: 'iberian_union', actor: 1, target: 2 }, crowns());
+  setMomentSupport({ ok: true, version: '0.5.0', reason: '' });
+  const fresh = moment({ moment: 'iberian_union', actor: 1, target: 2 }, crowns());
+  check(
+    'H7. a mod too old for the library refuses before any other reasoning',
+    !stale.ok && /cannot be executed/.test(stale.error) && /v0\.5\.0 or newer/.test(stale.error) && fresh.ok,
+    stale.ok ? 'ACCEPTED on a mod without the events' : stale.error,
+  );
+}
+
+{
+  const st = crowns();
+  const r = moment({ moment: 'iberian_union', actor: 1, target: 2 }, st);
+  const script = r.ok ? r.action.toScript({ moment: 'iberian_union', actor: 1, target: 2 }, 88, st).join('\n') : '';
+  check(
+    'H8. the staged script licenses and equips, and starts nothing',
+    r.ok
+      && /add_pressed_claim = scope:hd_target\.primary_title/.test(script)
+      && /add_gold = 600/.test(script)
+      && /modifier = hd_moment_union/.test(script)
+      && /trigger_event = hd_event\.0210/.test(script)
+      && !/start_war/.test(script)
+      && !/change_title_holder/.test(script)
+      // One guard around all of it, and the refusal branch intact.
+      && /HD:\/;\/refused\/;\/88\/;\/historical_moment/.test(script),
+    r.ok ? 'claim, gold, modifier and event inside one guard; no start_war, no title transfer' : r.error,
+  );
+}
+
+{
+  // Every offered moment must name mod content that actually exists, or it
+  // fails the way a missing modifier always does: a line in error.log.
+  const modFile = fs.readFileSync(path.join(ROOT_DIR, 'mod', 'common', 'modifiers', 'hd_modifiers.txt'), 'utf8');
+  const eventFile = fs.readFileSync(path.join(ROOT_DIR, 'mod', 'events', 'hd_events.txt'), 'utf8');
+  const missing = [];
+  for (const key of MOMENT_KEYS) {
+    const m = MOMENTS[key];
+    if (!modFile.includes(m.modifier + ' = {')) missing.push(key + ': modifier ' + m.modifier);
+    if (!eventFile.includes(m.event + ' = {')) missing.push(key + ': event ' + m.event);
+  }
+  check(
+    'H9. every offered moment names mod content that exists',
+    missing.length === 0,
+    missing.length ? missing.join('; ') : MOMENT_KEYS.length + ' moments, all their events and modifiers defined',
   );
 }
 

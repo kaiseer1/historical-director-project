@@ -96,3 +96,33 @@ hd_iberian_pressure_crusade = {
 	advantage = 4
 	levy_size = 0.1
 }
+
+# --- Historical moments ----------------------------------------------------
+# One per offered moment in src/director/moments.js. Between the momentum
+# modifiers and the Iberian pressure ones in strength, and for a reason: a
+# moment licenses a specific war against a specific realm that the record says
+# happened, so it is more pointed than ambient regional pressure and less
+# lavish than momentum, which pays for a war the player picked out by hand.
+#
+# Twenty-five years, because these are processes rather than campaigns: the
+# Castilian-Leonese union took seventy years of dynastic accident, and the
+# Almohad collapse ran three decades past Las Navas. A modifier that expires in
+# ten would be describing a different kind of event.
+
+hd_moment_union = {
+	icon = martial_positive
+	ai_war_chance = 25
+	ai_war_cooldown = -0.5
+	advantage = 3
+	levy_size = 0.15
+	monthly_prestige = 1
+}
+
+hd_moment_decline = {
+	icon = martial_positive
+	ai_war_chance = 25
+	ai_war_cooldown = -0.5
+	advantage = 3
+	levy_size = 0.15
+	monthly_piety = 1
+}

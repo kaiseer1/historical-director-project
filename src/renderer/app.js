@@ -250,6 +250,8 @@ function renderWorld() {
       'Claims can still be granted; only the effects that make a ruler able and willing to press one are withheld.'],
     [s.config?.macro, 'The Iberian pressure event is unavailable.',
       'Its modifiers, its event chain and the union decision all live in the companion mod, so the whole action is withheld rather than partly applied.'],
+    [s.config?.moment, 'The historical moment library is unavailable.',
+      'Its events and modifiers live in the companion mod, so moments are withheld entirely rather than staged with half their effects.'],
   ];
   for (const [feature, headline, consequence] of gated) {
     if (!feature || feature.ok) continue;
@@ -275,7 +277,7 @@ function renderWorld() {
       const macro = s.config?.macro;
       const version = mom?.version ?? macro?.version;
       if (!version) return mom?.checked ? 'not deployed' : 'unverified';
-      const stale = [!mom?.ok && 'momentum', !macro?.ok && 'macro events'].filter(Boolean);
+      const stale = [!mom?.ok && 'momentum', !macro?.ok && 'macro events', !s.config?.moment?.ok && 'historical moments'].filter(Boolean);
       return stale.length ? `v${version} (too old for ${stale.join(' and ')})` : `v${version}`;
     })()],
     ['Model', s.config?.model ?? '-'],

@@ -449,3 +449,47 @@ hd_event.0201 = {
 	}
 }
 
+# --- Historical moments ----------------------------------------------------
+#
+# One per offered moment in src/director/moments.js. These are acknowledgements
+# rather than choices: by the time a ruler reads one, the Director has already
+# staged the claim, the money and the disposition, and the player has already
+# approved it. The event exists so the moment arrives as something a court
+# would notice rather than as four silent modifiers.
+#
+# They carry no effects and no options beyond closing, deliberately. An event
+# that granted anything would be a second, unreviewed channel for the Director
+# to change the world through, and everything it could grant has already been
+# granted by the batch that fired it.
+
+hd_event.0210 = {
+	type = character_event
+	title = hd_event.0210.t
+	desc = hd_event.0210.desc
+	theme = realm
+
+	left_portrait = {
+		character = root
+		animation = thinking
+	}
+
+	option = {
+		name = hd_event.0210.a
+	}
+}
+
+hd_event.0211 = {
+	type = character_event
+	title = hd_event.0211.t
+	desc = hd_event.0211.desc
+	theme = realm
+
+	left_portrait = {
+		character = root
+		animation = worry
+	}
+
+	option = {
+		name = hd_event.0211.a
+	}
+}

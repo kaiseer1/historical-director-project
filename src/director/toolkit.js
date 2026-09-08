@@ -18,6 +18,7 @@ import { resolveTagged } from '../bridge/ck3Script.js';
 import { expectationFor } from './bookmarkTiers.js';
 import { MOMENTUM, MOMENTUM_KEYS, isMomentum, momentumOf, momentumScript, momentumPreview, momentumSupport } from './momentum.js';
 import { INTENSITY, INTENSITY_KEYS, MAX_PARTNERS, intensityBand, iberianPressureScript, inRegion, hasRegionData, IBERIA_REGION, macroSupport } from './macroEvents.js';
+import { MOMENTS, MOMENT_KEYS, isMoment, inWindow, windowError, momentScript, momentPreview, momentSupport } from './moments.js';
 
 /** Characters CK3 script treats structurally. Never let these through. */
 const UNSAFE = /["'{}\[\]$\\=#\r\n\t]/g;
@@ -797,6 +798,109 @@ export const TOOLKIT = {
       partnerTags: (a.partners ?? []).map((p) => tagOf(state, safeInt(p))).filter((t) => t !== null),
       intensity: String(a.intensity ?? ''),
     }, token),
+  },
+
+  /**
+   * A named turning point from the record, staged around two realms.
+   *
+   * The generic half of the macro-event library: everything specific to a given
+   * moment lives in moments.js, so adding the next one is a table entry, an
+   * event and three localisation lines rather than another action here.
+   *
+   * It licenses and equips; it does not transfer titles and does not start wars.
+   * The actor gains a pressed claim on the target's primary title - which at
+   * kingdom tier carries the de jure vassals with it, and which claim_cb lets
+   * them press even inside a struggle - together with the money and the appetite
+   * to fight for it. Whether they do is the AI's decision.
+   */
+  historical_moment: {
+    signature: 'historical_moment',
+    destructive: true,
+    description:
+      'Stage a named turning point the historical record carries, around two realms in it. '
+      + 'The actor gains a pressed claim on the target\'s primary title, money, and a lasting appetite for pressing it; '
+      + 'at kingdom tier that claim carries the de jure vassals with it, so winning the resulting war is a union. '
+      + 'It transfers no titles and starts no war: the actor still has to fight, and may not. '
+      + 'Propose one only where the record plainly supports this moment between these two realms at this date.',
+    parameters: {
+      type: 'object',
+      properties: {
+        moment: {
+          type: 'string',
+          enum: MOMENT_KEYS,
+          description: MOMENT_KEYS.map((k) => `${k}: ${MOMENTS[k].summary} (${MOMENTS[k].shape})`).join(' | '),
+        },
+        actor: { type: 'integer', description: 'Character id the moment gathers around' },
+        target: { type: 'integer', description: 'Character id the moment is directed against' },
+      },
+      required: ['moment', 'actor', 'target'],
+      additionalProperties: false,
+    },
+
+    validate(a, state) {
+      // First, for the same reason iberian_pressure checks it first: the event,
+      // the modifiers and the whole action live in mod content, so a mod that
+      // predates them runs the batch, reports ok, and does none of it.
+      const mod = momentSupport();
+      if (!mod.ok) return `historical_moment cannot be executed: ${mod.reason}`;
+
+      const key = String(a.moment ?? '');
+      if (!isMoment(key)) {
+        return `"${safeString(a.moment, 40)}" is not an offered moment; the ones that are offered are ${MOMENT_KEYS.join(', ')}`;
+      }
+
+      const actor = safeInt(a.actor);
+      const target = safeInt(a.target);
+      if (actor === null || !state.realmsById.has(actor)) return `actor ${a.actor} is not a ruler in the snapshot`;
+      if (target === null || !state.realmsById.has(target)) return `target ${a.target} is not a ruler in the snapshot`;
+      if (actor === target) return 'a realm cannot be the subject and the object of the same moment';
+
+      // The date. A moment outside its window is a different historical process
+      // wearing this one's name.
+      const window = windowError(key, state.year);
+      if (window) return window;
+
+      // The place. Both realms must hold land in the moment's own region, on the
+      // same reasoning iberian_pressure uses: geography where the snapshot
+      // reports it, and refused outright where it does not, because a moment is
+      // a claim about a specific part of the world.
+      if (!hasRegionData(state)) {
+        return 'this snapshot carries no per-realm geography, so the Director cannot confirm either realm belongs to this moment';
+      }
+      const region = MOMENTS[key].region;
+      const outsiders = [actor, target]
+        .map((id) => state.realmsById.get(id))
+        .filter((r) => !inRegion(r, region));
+      if (outsiders.length) {
+        const names = outsiders.map((r) => r.primaryTitle || r.ruler);
+        return `${names.join(' and ')} ${names.length > 1 ? 'do' : 'does'} not hold land where ${MOMENTS[key].label} took place`;
+      }
+
+      return requireLocality(state, [actor, target], 'historical_moment');
+    },
+
+    preview(a, state) {
+      const key = String(a.moment ?? '');
+      const actor = state.realmsById.get(safeInt(a.actor));
+      const target = state.realmsById.get(safeInt(a.target));
+      const actorName = actor?.ruler ?? String(a.actor);
+      const targetName = target?.ruler ?? String(a.target);
+      const tier = target?.tierKey ? `the ${target.tierKey}-tier title ` : '';
+
+      return `Stage ${MOMENTS[key]?.label ?? key} around ${actorName}, directed at ${targetName} and ${tier}${target?.primaryTitle ?? 'their primary title'}.`
+        + momentPreview(key, actorName, targetName)
+        + distanceNote(state, [safeInt(a.actor), safeInt(a.target)]);
+    },
+
+    toScript: (a, token, state) => [
+      ...resolveTagged(tagOf(state, safeInt(a.actor)), 'hd_actor'),
+      ...resolveTagged(tagOf(state, safeInt(a.target)), 'hd_target'),
+      ...guarded(
+        'exists = scope:hd_actor\n\t\texists = scope:hd_target\n\t\texists = scope:hd_target.primary_title',
+        momentScript(String(a.moment ?? ''), 'scope:hd_actor', 'scope:hd_target'),
+        'historical_moment',
+        token,
+      )],
   },
 
   trigger_event: {
