@@ -269,6 +269,70 @@ export function momentScript(key, actorScope, targetScope) {
 }
 
 /**
+ * Which curated moments fit this world right now.
+ *
+ * Computed rather than described, for the same reason the bookmark briefing is:
+ * a rule the model has to remember competes with everything else in the prompt,
+ * and a fact placed in front of it does not. A live audit made the difference
+ * concrete - the Castile-Leon union at 1205 is exactly `iberian_union`, the
+ * library was loaded and applicable, and the model reached for the general
+ * `grant_claim` because nothing told it a curated moment was sitting there.
+ *
+ * A moment qualifies when the date is inside its window and the snapshot holds
+ * at least two realms in its region, because a moment needs someone to act and
+ * someone to act upon.
+ *
+ * @param {any} snapshot
+ * @param {number} year
+ * @returns {Array<{key: string, label: string, summary: string, shape: string, candidates: any[]}>}
+ */
+export function applicableMoments(snapshot, year) {
+  const realms = snapshot?.byRelevance ?? snapshot?.byFootprint ?? [];
+  const out = [];
+
+  for (const key of MOMENT_KEYS) {
+    const m = MOMENTS[key];
+    if (!inWindow(key, year)) continue;
+    const inside = realms.filter((r) => Array.isArray(r.regions) && r.regions.includes(m.region));
+    if (inside.length < 2) continue;
+    out.push({ key, label: m.label, summary: m.summary, shape: m.shape, candidates: inside.slice(0, 8) });
+  }
+
+  return out;
+}
+
+/**
+ * That list as the prompt section. Empty string when nothing fits, so the
+ * section disappears rather than announcing its own absence.
+ *
+ * @param {any} snapshot
+ * @param {number} year
+ * @returns {string}
+ */
+export function momentBriefing(snapshot, year) {
+  const fitting = applicableMoments(snapshot, year);
+  if (fitting.length === 0) return '';
+
+  const blocks = fitting.map((f) => {
+    const who = f.candidates
+      .map((r) => `${r.id} ${r.primaryTitle} (${r.tierKey ?? 'unknown tier'}, ${r.countiesInSphere} counties)`)
+      .join('; ');
+    return [
+      `- ${f.key}: ${f.label} - ${f.summary}`,
+      `  ${f.shape}`,
+      `  Realms in that region right now: ${who}`,
+    ].join('\n');
+  });
+
+  return [
+    'These curated moments fit this world at this date. Each carries the record\'s own framing, an event the ruler actually sees, and effects tuned to it.',
+    ...blocks,
+    '',
+    'If what you are about to propose IS one of these, propose it as historical_moment rather than as a bare grant_claim. A union the record names is not the same proposal as an opportunistic claim, and should not arrive looking like one.',
+  ].join('\n');
+}
+
+/**
  * The sentence appended to the proposal preview.
  *
  * Itemised rather than summarised. A moment touches two realms and grants four

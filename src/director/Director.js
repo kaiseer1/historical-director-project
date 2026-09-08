@@ -2,6 +2,7 @@ import { renderRealmTable } from '../model/WorldState.js';
 import { toolSchemas, validateProposal } from './toolkit.js';
 import { label, labelList } from './regions.js';
 import { bookmarkBriefing } from './bookmarkTiers.js';
+import { momentBriefing } from './moments.js';
 import * as wikipedia from '../knowledge/wikipedia.js';
 import * as wikidata from '../knowledge/wikidata.js';
 
@@ -313,6 +314,9 @@ export class Director {
       '',
       'WHAT YOU MAY WATCH IS WIDER THAN WHAT YOU MAY ARRANGE.',
       'Each row is marked "neighbour" (the player\'s own ground), "nearby" (their neighbourhood), or "distant, watch only" (the rim of the sphere). grant_claim, set_relations and trigger_event all push rulers into each other, and every one of them needs at least one party marked neighbour or nearby. A claim granted to one distant realm against another distant realm is a war on the far side of the world in which the player has no stake, and it will be rejected however well argued. adjust_title_tier is not restricted this way: the shape of the map is worth correcting wherever it has gone wrong.',
+      '',
+      'PREFER A CURATED MOMENT WHERE ONE FITS.',
+      'historical_moment carries a turning point the record actually names, with its own framing, an event the ruler sees, and effects tuned to that moment. grant_claim is the general tool, for a claim the record supports that is not one of the curated moments. Where the briefing below names a moment matching what you intend, propose the moment.',
       'Destroying an empire- or kingdom-tier primary title releases the vassals below it and can fragment a region in a single stroke. Treat it as a major intervention: propose it only at high confidence, and state that consequence plainly in the consequences field.',
       '',
       'PREFER BUILDING OVER BREAKING.',
@@ -361,6 +365,7 @@ export class Director {
     const approved = this.loreBook.approvedSummaries();
 
     const briefing = bookmarkBriefing(snapshot.year, this.baseline?.capturedYear ?? 0);
+    const moments = momentBriefing(snapshot, snapshot.year);
 
     const user = [
       `Date in game: ${snapshot.date} (year ${snapshot.year})`,
@@ -372,6 +377,7 @@ export class Director {
       renderRealmTable(snapshot, this.maxRealmsInPrompt, this.baseline),
       '',
       ...(briefing ? ['## The record at the nearest bookmark', briefing, ''] : []),
+      ...(moments ? ['## Curated moments that fit this date', moments, ''] : []),
       ...vanishedSection(snapshot, this.baseline),
       '## Retrieved historical evidence',
       evidenceBlock,

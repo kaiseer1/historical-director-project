@@ -21,7 +21,7 @@ import { Director } from '../src/director/Director.js';
 import { momentumScript, MOMENTUM_KEYS, setMomentumSupport } from '../src/director/momentum.js';
 import { compareVersions, deployedModVersion, momentumSupport, macroSupport, momentSupport as resolveMomentSupport, MACRO_MIN_MOD, MOMENT_MIN_MOD, setObservedModVersion, observedModVersion } from '../src/setup/modVersion.js';
 import { setMacroSupport } from '../src/director/macroEvents.js';
-import { MOMENTS, MOMENT_KEYS, ALL_MOMENT_KEYS, setMomentSupport } from '../src/director/moments.js';
+import { MOMENTS, MOMENT_KEYS, ALL_MOMENT_KEYS, setMomentSupport, applicableMoments, momentBriefing } from '../src/director/moments.js';
 import { preflight } from '../src/setup/preflight.js';
 import { LoreBook } from '../src/lore/LoreBook.js';
 import { INTENSITY, INTENSITY_KEYS, intensityBand, hasRegionData } from '../src/director/macroEvents.js';
@@ -1968,6 +1968,90 @@ function ledger() {
     console.log('\n' + passed + ' passed, ' + failed + ' failed\n');
     process.exit(failed === 0 ? 0 : 1);
   });
+}
+
+// --- showing the model which moments fit -------------------------------------
+// A live 1205 audit proposed the Castile-Leon union - which is exactly
+// iberian_union, with the library loaded and applicable - as a bare grant_claim,
+// because nothing put the fitting moment in front of it. Computed and shown,
+// for the same reason the bookmark briefing is: a rule competes with everything
+// else in the prompt, a fact does not.
+
+function iberiaSnapshot(year) {
+  return {
+    year,
+    byRelevance: [
+      { id: 11, primaryTitle: 'Kingdom of Castile', tierKey: 'kingdom', countiesInSphere: 24, regions: ['world_europe_west_iberia'] },
+      { id: 12, primaryTitle: 'Kingdom of Leon', tierKey: 'kingdom', countiesInSphere: 18, regions: ['world_europe_west_iberia'] },
+      { id: 14, primaryTitle: 'Kingdom of Bengal', tierKey: 'kingdom', countiesInSphere: 9, regions: ['world_india_bengal'] },
+    ],
+  };
+}
+
+{
+  const fit = applicableMoments(iberiaSnapshot(1205), 1205);
+  check(
+    'B1. both Iberian moments fit a 1205 peninsula',
+    fit.length === 2 && fit.map((f) => f.key).sort().join(',') === 'almohad_decline,iberian_union',
+    fit.map((f) => f.key).join(', '),
+  );
+}
+
+{
+  const text = momentBriefing(iberiaSnapshot(1205), 1205);
+  check(
+    'B2. the briefing names the candidate realms by id, not just the moment',
+    /11 Kingdom of Castile/.test(text) && /12 Kingdom of Leon/.test(text) && /historical_moment rather than as a bare grant_claim/.test(text),
+    'ids and the instruction both present',
+  );
+  check(
+    'B3. and it does not offer realms from another region as candidates',
+    !/Bengal/.test(text),
+    'Bengal is in the snapshot and correctly absent from an Iberian moment',
+  );
+}
+
+{
+  // Out of window, so nothing fits and the section disappears rather than
+  // announcing its own emptiness.
+  const text = momentBriefing(iberiaSnapshot(700), 700);
+  check(
+    'B4. nothing fits in 700, and the briefing is empty rather than noisy',
+    text === '' && applicableMoments(iberiaSnapshot(700), 700).length === 0,
+    'empty string, so the prompt section is omitted entirely',
+  );
+}
+
+{
+  // A moment needs someone to act and someone to act upon.
+  const lonely = {
+    year: 1205,
+    byRelevance: [
+      { id: 11, primaryTitle: 'Kingdom of Castile', tierKey: 'kingdom', countiesInSphere: 24, regions: ['world_europe_west_iberia'] },
+    ],
+  };
+  check(
+    'B5. one realm in the region is not enough for a moment to fit',
+    applicableMoments(lonely, 1205).length === 0,
+    'an actor with nobody to act upon is not a moment',
+  );
+}
+
+{
+  // Unoffered moments must never appear in the briefing, for the same reason
+  // they are absent from the enum.
+  const arabia = {
+    year: 1258,
+    byRelevance: [
+      { id: 21, primaryTitle: 'Abbasid Caliphate', tierKey: 'empire', countiesInSphere: 20, regions: ['world_middle_east_arabia'] },
+      { id: 22, primaryTitle: 'Ilkhanate', tierKey: 'empire', countiesInSphere: 30, regions: ['world_middle_east_arabia'] },
+    ],
+  };
+  check(
+    'B6. a declared but unoffered moment is never briefed',
+    applicableMoments(arabia, 1258).every((f) => f.key !== 'abbasid_twilight'),
+    'abbasid_twilight is in the table, in window, with candidates present, and still not offered',
+  );
 }
 
 try { fs.unlinkSync(tmp); } catch { /* already gone */ }
