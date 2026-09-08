@@ -412,6 +412,13 @@ hd_event.0200 = {
 		name = hd_event.0200.b
 		add_prestige = minor_prestige_gain
 	}
+
+	# Re-arms the execution pump. This window is fullscreen, and a fullscreen
+	# window can silently kill the console-created widget the pump lives in.
+	widget = {
+		gui = "hd_rearm_widget"
+		container = "custom_widgets_container"
+	}
 }
 
 # The inheritance opening, five years on, and only from the strongest tier. It
@@ -476,6 +483,13 @@ hd_event.0210 = {
 	option = {
 		name = hd_event.0210.a
 	}
+
+	# Re-arms the execution pump. This window is fullscreen, and a fullscreen
+	# window can silently kill the console-created widget the pump lives in.
+	widget = {
+		gui = "hd_rearm_widget"
+		container = "custom_widgets_container"
+	}
 }
 
 hd_event.0211 = {
@@ -491,5 +505,12 @@ hd_event.0211 = {
 
 	option = {
 		name = hd_event.0211.a
+	}
+
+	# Re-arms the execution pump. This window is fullscreen, and a fullscreen
+	# window can silently kill the console-created widget the pump lives in.
+	widget = {
+		gui = "hd_rearm_widget"
+		container = "custom_widgets_container"
 	}
 }

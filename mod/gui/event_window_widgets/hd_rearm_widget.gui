@@ -1,0 +1,39 @@
+﻿# Historical Director - a re-arm mount for the execution pump.
+#
+# Fullscreen event windows kill console-created widgets. The engine does it
+# silently, it cannot be prevented from the mod side, and the pump is exactly
+# such a widget - so the pump dies, and until now the only thing that noticed
+# was a watchdog running once a game year.
+#
+# The fix is not to stop the pump dying. It is to put resurrection points
+# everywhere it might have died, which is VOTC's finding after losing an
+# afternoon to it; see issue #1 on this repository. Every Director event window
+# is one of those points, because an event window appearing is precisely the
+# thing that may just have killed the pump.
+#
+# Attached to events that had no widget of their own, so there is no sibling
+# state machine here to compete with. Sibling states under one widget are
+# mutually exclusive in this engine and an extra one can starve the others -
+# VOTC lost two implementations to that rule - which is why this is its own
+# file rather than a second state bolted onto an existing widget.
+#
+# Clear then create, in that order, through the two hooks of a single state.
+# VOTC does both in one ExecuteConsoleCommands string; this uses two calls to
+# the singular ExecuteConsoleCommand instead, which is the form the game's own
+# gui/ files use. Console commands execute serially either way, so a pump that
+# was still alive converges back to one instance rather than being doubled.
+
+hbox = {
+	name = "hd_rearm_widget"
+	layoutpolicy_horizontal = expanding
+	margin = { 10 0 }
+
+	state = {
+		name = rearm
+		trigger_on_create = yes
+		on_start = "[ExecuteConsoleCommand('GUI.ClearWidgets hd_runner')]"
+		on_finish = "[ExecuteConsoleCommand('gui.createwidget gui/custom_gui/hd_runner.gui hd_runner')]"
+	}
+
+	expand = {}
+}

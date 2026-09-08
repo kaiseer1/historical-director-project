@@ -1,6 +1,24 @@
 ﻿# Attached to hd_event.0002, the proposal notification. Pauses the game the
 # moment the notification appears, which is the paper's auto-pause: the player
 # is never asked to judge a proposal while the world keeps moving.
+#
+# It also re-arms the execution pump, and this is the most valuable of the
+# re-arm mounts. A fullscreen event window can silently kill a console-created
+# widget, and the pump is one; this window is fullscreen; and the batch the
+# pump will be asked to execute is the very approval the player is about to
+# give. Without a re-arm here, the notification that asks for a decision is
+# capable of destroying the thing that would carry it out.
+#
+# The re-arm is a nested child rather than a second state on the pause widget
+# itself. Sibling states under one widget are mutually exclusive state machines
+# in this engine, and an extra one can starve the others - VOTC lost two
+# implementations to that rule before naming it, and one of the failures went
+# as far as making a dialogue's exit button stop working. A child widget has
+# its own state machine and competes with nobody. VOTC also saw a container
+# starve a sibling in their tree, so this specific mount is the one place here
+# that wants watching in a live game: if the game ever stops pausing on a
+# proposal, this is what to suspect first.
+
 hbox = {
 	name = "hd_pause_widget"
 	layoutpolicy_horizontal = expanding
@@ -10,6 +28,17 @@ hbox = {
 		name = pause
 		trigger_when = "[Not(IsGamePaused)]"
 		on_start = "[OnPause]"
+	}
+
+	hbox = {
+		name = "hd_pause_rearm"
+
+		state = {
+			name = rearm
+			trigger_on_create = yes
+			on_start = "[ExecuteConsoleCommand('GUI.ClearWidgets hd_runner')]"
+			on_finish = "[ExecuteConsoleCommand('gui.createwidget gui/custom_gui/hd_runner.gui hd_runner')]"
+		}
 	}
 
 	expand = {}

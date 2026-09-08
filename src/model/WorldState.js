@@ -179,6 +179,13 @@ export class SnapshotAssembler {
         return null;
       }
 
+      case 'log_clear_requested':
+        // The echo of our own request, written by the same batch that set the
+        // slot variable. It confirms the batch executed, which is not the same
+        // as the clear happening - only the log shrinking says that, and the
+        // tailer is what sees it.
+        return { type: 'logClearRequested', slot: rec.fields[0] ?? '' };
+
       case 'mod_version':
         // What the running game has loaded, which is not the same question as
         // what is deployed on disk. Emitted from hd_mark_alive, so it arrives

@@ -6,11 +6,11 @@ Where the Historical Director actually stands, as distinct from what it is desig
 Kept honest: a thing is "working" here only if it has been watched working, and everything that has
 not been is listed as such.
 
-**Status:** v0.5.2 alpha · `main`, companion mod v0.5.1 deployed
+**Status:** v0.6.0 alpha · branch `feat/engine-resilience`, companion mod v0.6.0 (needs redeploy and a CK3 restart)
 **Last live test:** 8 September 2026 — a 1193-1206 Kingdom of Castile campaign. Findings in sections
 3c and 3g; the moment library and the duplicate guard both came out of it.
-**Last harness test:** 8 September 2026 — 143 tier and gate cases, 8 region cases, 4 localisation
-cases, and the full loop end to end across all three smoke legs
+**Last harness test:** 8 September 2026 — 150 tier and gate cases, 27 engine-resilience cases,
+8 region cases, 4 localisation cases, and the full loop end to end across all three smoke legs
 
 > **New to this project, or a fresh session?** Read **section 3c** first. It is the current state of
 > play: what the last live campaign proved, what was fixed because of it, and the one thing that was
@@ -442,6 +442,126 @@ not a quiet world; it is a broken emit, and the first version said exactly that 
 **Orchestrator-side only.** `snapshotScript` is generated into `run/hd.txt` and executed by the mod's
 existing pump, so this is **no mod change, no redeploy, no CK3 restart** — restarting `npm start` is
 enough.
+
+## 3h. Three engine limits, borrowed rather than discovered, v0.6.0
+
+The VOTC project filed [issue #1](https://github.com/kaiseer1/historical-director-project/issues/1)
+on this repository: a postmortem of an afternoon spent finding three CK3 behaviours the hard way. All
+three apply here, two of them worse than they did there, and none of them was visible from inside
+this codebase. Recording that plainly because it is the most useful thing in this document: **the
+findings are theirs, measured under controlled experiment, and this section is what it cost to act on
+them rather than to discover them.**
+
+### The 17MB wall
+
+CK3's log subsystem stops writing after roughly **17MB of cumulative writes in a session**, and
+`debug.log` and `error.log` die together. The limit counts what the engine has written, not what is
+on disk, which makes the obvious fix useless:
+
+| Cleanup | Peak file | Cumulative | Result |
+|---|---:|---:|---|
+| None | 17.3MB | 17.3MB | dead |
+| External truncation every 4MB | 13.4MB | 17.6MB | **dead** |
+| In-game `log.clearAll` | 7.2MB | 59.6MB+ | alive |
+
+The middle row is the one worth staring at. Truncating the file from outside is the fix anyone would
+reach for first, and it does nothing at all.
+
+**Worse here than in VOTC.** The Director is a bulk writer where VOTC is a conversational one. One
+snapshot of a twenty-region sphere is several thousand lines, and the live campaign that prompted the
+war-reporting work was running a one-year audit cadence over 193 realms. That is an afternoon to the
+wall, after which the Director goes blind and nothing says so.
+
+**What it took.** `log.clearAll` is a console command. No effect in the game runs a console command -
+checked, not assumed - and the run file the orchestrator stages contains effects, so the orchestrator
+cannot clear the log. It can only ask.
+
+The bridge from script state to a GUI condition was not obvious either. `HasGlobalVariable` and
+`GetGlobalVariable` **do not exist as GUI functions**; they appear nowhere in the game's own `gui/`
+files. A scripted GUI is the attested route: `is_shown` is a script trigger, GUI reads it through
+`GetScriptedGui('name').IsShown(...)`, and `effect` is the return path that retires the request. So:
+
+```
+orchestrator                      mod
+------------                      ---
+bytes read > 4MB
+  set_global_variable  ------->   hd_log_clear_a
+                                  scripted GUI is_shown = has_global_variable
+  widget                <-------  GetScriptedGui('hd_log_clear_a').IsShown
+                                  ExecuteConsoleCommand('log.clearAll')
+                                  .Execute -> remove_global_variable
+tailer sees the file shrink  <--  (the only acknowledgment there is)
+```
+
+Four slots rotate, because a GUI state fires on a false-to-true edge and consecutive requests need
+distinct edges. Each request also retires the *previous* slot, which is not tidiness: a slot left set
+by a widget that was dead when the request arrived would never present a fresh edge again, and the
+fifth clear of a session would silently do nothing.
+
+**The rule that costs the most to get wrong.** A clear is never requested while a staged batch is
+waiting to be acknowledged. Two reasons, and the second is the bad one: there is only one run file,
+so a clear request would overwrite a pending batch; and `log.clearAll` destroys the echo that batch
+is about to write, so the orchestrator would time out and report a dead pump for a batch that ran
+perfectly. Waiting costs bytes. Clearing costs the truth.
+
+### Fullscreen event windows kill the pump
+
+Any fullscreen event window can silently destroy a console-created widget, and the pump is one. VOTC
+reproduced it three times in an evening and established that it is not specific to any event.
+
+The defence is not prevention - the engine behaviour cannot be prevented - but resurrection points
+wherever it may just have happened. Every window this mod opens is now one: the proposal
+notification, the macro event, and both moment acknowledgements. Each clears the pump before
+recreating it, so a pump that was still alive converges back to one instance rather than doubling.
+
+**The watchdog moved to `quarterly_playable_pulse`, not monthly.** The brief said monthly; there is
+no monthly global pulse in CK3. `yearly_global_pulse` is the only global one the engine offers -
+`common/on_action/_on_actions.info` lists them - and `quarterly_playable_pulse` is the fastest
+attested hook that reaches a player. It carries a character root and fires for every playable
+character on the map, so the effect is gated to the player; a watchdog that fired for four hundred
+counts would ask four hundred times whether one widget exists.
+
+It also stays *conditional*. Rebuilding unconditionally would mean firing `hd_event.0001` at the
+player every quarter, and 0001 is a visible popup. A fix that interrupts the campaign four times a
+year to solve a problem the player does not have is not a fix.
+
+### A dead pump and a dead log are the same silence
+
+Both look like this from the orchestrator's chair: a staged batch is never acknowledged and nothing
+arrives. They need opposite responses - Recall the pump, or restart the game - so guessing is worse
+than saying nothing.
+
+The discriminator is the log file rather than the records in it. If the engine is still writing
+anything at all, the subsystem is alive and the silence is the pump's. If the file has stopped
+growing altogether, the subsystem is the suspect.
+
+**Log exhaustion is checked first, and that ordering is the whole point.** When the log is dead every
+dead-pump symptom is present too, because the echo cannot reach us either - so the pump diagnosis
+would send the player to fix a working thing with a tool that cannot work.
+
+This needs no knowledge of whether the game is paused, which the orchestrator has no way to ask. The
+pump is a GUI widget on a two-second timer and GUI timers keep running through a pause, so a paused
+game with a live pump still writes its liveness mark - which is why `RunFileManager.clear` leaves
+`hd_mark_alive` outside the token guard.
+
+### What is verified and what is not
+
+Everything orchestrator-side is covered by `scripts/check-resilience.mjs`: 27 cases over the budget
+rules, the tailer's rewind, the two banners and their ordering, and the mod files themselves - every
+slot the orchestrator can ask for has a scripted GUI and a widget watching it, no slot stacks a
+second state, and the watchdog names a hook the engine actually calls.
+
+**The GUI mounting is not verified in a live game.** It cannot be from here: it needs a redeploy and
+a CK3 restart. Two specific things want watching, and both are named in the code:
+
+1. `GUI.ClearWidgets hd_runner` - the *named* form. Vanilla only ever uses the bare
+   `GUI.ClearWidgets`, which would clear every console-created widget including VOTC's. The named
+   form is VOTC's, validated live in their game but not attested in the game files. If it is ignored,
+   the failure is duplicate pumps rather than none.
+2. The re-arm nested inside `hd_pause_widget`. VOTC saw a container starve a sibling state machine in
+   their tree. If the game ever stops pausing on a proposal, that nesting is the first suspect.
+
+Neither is guessed at silently; both are marked in the files that contain them.
 
 ---
 

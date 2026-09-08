@@ -53,6 +53,19 @@ export const MACRO_MIN_MOD = '0.4.3';
 export const MOMENT_MIN_MOD = '0.5.0';
 
 /**
+ * The mod version that first carried the log-clear executor: the four
+ * hd_log_clear_* scripted GUIs and the widget slots that watch them.
+ *
+ * Gated like the rest, but for a sharper reason than the others. An older mod
+ * would take a clear request as a global variable nothing ever reads: no error,
+ * no refusal, and no clear - so the byte budget would never reset and the
+ * orchestrator would ask again on every tick, for ever, while the log marched
+ * on to the 17MB wall it was trying to avoid. A feature that silently does
+ * nothing is worse here than one that is refused out loud.
+ */
+export const LOGCLEAR_MIN_MOD = '0.6.0';
+
+/**
  * Compare two dotted version strings numerically.
  * @returns {number} negative when a < b, 0 when equal, positive when a > b
  */
@@ -168,6 +181,16 @@ export function momentSupport(ck3UserFolder) {
     MOMENT_MIN_MOD,
     'the historical moment library',
     'its events and modifiers',
+  );
+}
+
+/** @param {string} ck3UserFolder */
+export function logClearSupport(ck3UserFolder) {
+  return featureSupport(
+    ck3UserFolder,
+    LOGCLEAR_MIN_MOD,
+    'clearing the game log',
+    'the scripted GUIs and widget slots that execute log.clearAll',
   );
 }
 

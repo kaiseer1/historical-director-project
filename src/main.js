@@ -1,5 +1,7 @@
 import { loadConfig, describeConfig } from './config.js';
 import { LogTailer } from './bridge/LogTailer.js';
+import { LogBudget } from './bridge/LogBudget.js';
+import { assess as assessLiveness } from './bridge/Liveness.js';
 import { RunFileManager } from './bridge/RunFileManager.js';
 import { SnapshotAssembler, belligerentName } from './model/WorldState.js';
 import { LoreBook } from './lore/LoreBook.js';
@@ -20,7 +22,7 @@ import { preflight, problemCount } from './setup/preflight.js';
 // Two similarly named things, kept apart on purpose: modVersion's resolves the
 // answer by reading the deployed descriptor, momentum's reports the answer the
 // toolkit is currently acting on.
-import { momentumSupport as resolveMomentumSupport, macroSupport as resolveMacroSupport, momentSupport as resolveMomentSupport, setObservedModVersion, observedModVersion } from './setup/modVersion.js';
+import { momentumSupport as resolveMomentumSupport, macroSupport as resolveMacroSupport, momentSupport as resolveMomentSupport, logClearSupport as resolveLogClearSupport, setObservedModVersion, observedModVersion } from './setup/modVersion.js';
 import { setMomentumSupport, momentumSupport as momentumSupportState } from './director/momentum.js';
 import { setMacroSupport, macroSupport as macroSupportState } from './director/macroEvents.js';
 import { setMomentSupport, momentSupport as momentSupportState } from './director/moments.js';
@@ -73,6 +75,16 @@ const baseline = new Baseline(cfg.baselinePath);
 const auditClock = new AuditClock(cfg.auditClockPath);
 const runFile = new RunFileManager(cfg.ck3UserFolder);
 const tailer = new LogTailer(cfg.debugLogPath);
+
+/**
+ * How much of CK3's log budget this session has spent.
+ *
+ * The engine stops logging after roughly 17MB of cumulative writes and only
+ * `log.clearAll` resets that; see bridge/LogBudget.js for why truncating the
+ * file from outside does not work. The Director is a heavy writer, so this is
+ * a wall a long campaign reaches rather than a theoretical one.
+ */
+const logBudget = new LogBudget({ thresholdMB: cfg.director.logClearThresholdMB });
 const assembler = new SnapshotAssembler();
 const llm = new LLMClient(cfg.llm);
 
@@ -107,6 +119,16 @@ const state = {
   pending: null,
   /** When that request was staged, for working out whether the pump is dead. */
   pendingSince: 0,
+  /**
+   * When one of our records last arrived, as distinct from when the log last
+   * grew at all. The difference between those two is what tells a dead pump
+   * apart from a dead log subsystem; see bridge/Liveness.js.
+   */
+  lastRecordAt: 0,
+  /** @type {{kind: string, text: string, detail: string} | null} */
+  banner: null,
+  /** Whether the deployed mod can service a log clear at all. */
+  logClear: { ok: false, reason: 'not checked yet' },
   /** null until we have evidence either way. */
   /** @type {boolean|null} */
   pumpAlive: null,
@@ -198,7 +220,18 @@ function requestSnapshot(regions, homeRegions, nearRegions) {
 
 tailer.on('status', (m) => log(m));
 
+tailer.on('cleared', ({ bytesBefore }) => {
+  // Either a clear we asked for has landed or the player restarted the game.
+  // Both mean the engine's cumulative write counter is back to zero, which is
+  // the only thing the budget cares about.
+  logBudget.confirmedClear();
+  if (bytesBefore > 0) {
+    log(`the game log was cleared after ${(bytesBefore / (1024 * 1024)).toFixed(1)}MB; CK3 can keep logging`);
+  }
+});
+
 tailer.on('record', async (rec) => {
+  state.lastRecordAt = Date.now();
   const out = assembler.ingest(rec);
   if (!out) return;
 
@@ -341,6 +374,10 @@ tailer.on('record', async (rec) => {
       broadcast('state', publicState());
       break;
     }
+
+    case 'logClearRequested':
+      log(`the game acknowledged the log-clear request (slot ${out.slot})`);
+      break;
 
     case 'eventFired':
       // Remembered so the applied line that follows can say whether the event
@@ -524,6 +561,14 @@ function publicState() {
     player: state.snapshot?.player ?? null,
     awaitingApply: state.awaitingApply ? state.awaitingApply.proposal.preview : null,
     pumpAlive: state.pumpAlive,
+    banner: state.banner,
+    log: {
+      // Shown so a long campaign can see the wall coming rather than meet it.
+      mbSinceClear: Number((tailer.bytesSinceClear / (1024 * 1024)).toFixed(2)),
+      thresholdMB: Number((logBudget.thresholdBytes / (1024 * 1024)).toFixed(2)),
+      clears: logBudget.confirmed,
+      supported: state.logClear.ok,
+    },
     lastRefusal: state.lastRefusal ?? null,
     lastAudit: state.lastAudit,
     config: {
@@ -606,6 +651,95 @@ setInterval(() => {
   broadcast('state', publicState());
 }, 5_000);
 
+
+// --------------------------------------------------------------------------
+// Keeping the bridge alive
+// --------------------------------------------------------------------------
+
+/**
+ * Is the run file holding something we are still waiting on an answer for?
+ *
+ * Two separate things make this true and both matter. `pending` is a locate
+ * or snapshot request; `awaitingApply` is an approved action. Either way the
+ * staged file is not ours to overwrite - and a log clear would do exactly
+ * that, because there is only one run file and one pump reading it.
+ *
+ * The second reason is subtler and worse. `log.clearAll` destroys the echo an
+ * in-flight batch is about to write, so the orchestrator would wait out the
+ * acknowledgment timeout and report a dead pump for a batch that ran
+ * perfectly. Waiting costs bytes. Clearing costs the truth.
+ */
+function ackPending() {
+  return state.pending !== null || state.awaitingApply !== null;
+}
+
+/**
+ * Ask the game to clear its own log, if it is time and nothing is in flight.
+ *
+ * The request is a global variable the mod's widget is watching; see
+ * bridge/LogBudget.js for why it cannot simply be done here. The run file is
+ * cleared straight afterwards rather than left standing, because the pump
+ * re-runs whatever it finds every two seconds and a standing request would
+ * clear the log on every pass until something else overwrote it.
+ */
+function maybeRequestLogClear() {
+  const verdict = logBudget.due({
+    bytesSinceClear: tailer.bytesSinceClear,
+    pendingAck: ackPending(),
+    supported: state.logClear.ok,
+  });
+  if (!verdict.due) return;
+
+  const slot = logBudget.staged();
+  const token = runFile.nextToken();
+  runFile.write(LogBudget.requestScript(slot), token);
+  log(
+    `asked the game to clear its log (slot ${slot}, ${(tailer.bytesSinceClear / (1024 * 1024)).toFixed(1)}MB read since the last one). ` +
+    'CK3 stops logging after about 17MB in a session and only an in-game clear resets that.',
+  );
+
+  // Retired immediately. The batch is one-shot by its token guard anyway, but
+  // leaving it staged would block the next snapshot request behind it.
+  setTimeout(() => {
+    if (!ackPending()) runFile.clear();
+  }, 3_000);
+}
+
+/**
+ * Work out whether the bridge has gone quiet, and if so, in which of the two
+ * ways it can. See bridge/Liveness.js: they need opposite responses from the
+ * player, so a wrong guess sends them to fix the wrong thing.
+ */
+function checkLiveness() {
+  const banner = assessLiveness({
+    now: Date.now(),
+    everResponded: state.connected,
+    lastLineAt: tailer.lastLineAt,
+    lastRecordAt: state.lastRecordAt,
+    pendingSince: state.pending || state.awaitingApply ? state.pendingSince : null,
+    bytesSinceClear: tailer.bytesSinceClear,
+    thresholdBytes: logBudget.thresholdBytes,
+    stallMs: (cfg.director.stallMinutes ?? 2) * 60_000,
+    ackMs: (cfg.director.ackTimeoutSeconds ?? 15) * 1000,
+  });
+
+  // Only announced on the way in and the way out, because this runs every
+  // five seconds and a banner that re-logged itself would bury the campaign.
+  const was = state.banner?.kind ?? null;
+  const now = banner?.kind ?? null;
+  if (was === now) return;
+
+  state.banner = banner;
+  if (banner) log(`${banner.text} ${banner.detail}`);
+  else log('the game is talking to us again');
+  broadcast('state', publicState());
+}
+
+setInterval(() => {
+  maybeRequestLogClear();
+  checkLiveness();
+}, 5_000);
+
 // --------------------------------------------------------------------------
 // Starting up
 // --------------------------------------------------------------------------
@@ -632,6 +766,11 @@ function checkModCapabilities() {
   const moment = resolveMomentSupport(cfg.ck3UserFolder);
   setMomentSupport(moment);
 
+  // Not handed to a module the way the others are: nothing in the toolkit
+  // depends on it, because clearing the log is maintenance and never touches
+  // game state. It only decides whether asking is worth doing.
+  state.logClear = resolveLogClearSupport(cfg.ck3UserFolder);
+
   const version = mom.version ?? macro.version ?? moment.version;
   if (mom.ok && macro.ok && moment.ok) {
     log(`companion mod v${version} deployed; momentum, macro events and the moment library available`);
@@ -640,6 +779,7 @@ function checkModCapabilities() {
     if (!mom.ok) log(`momentum unavailable: ${mom.reason}`);
     if (!macro.ok) log(`macro events unavailable: ${macro.reason}`);
     if (!moment.ok) log(`historical moments unavailable: ${moment.reason}`);
+    if (!state.logClear.ok) log(`log clearing unavailable: ${state.logClear.reason}. CK3 stops logging after about 17MB in a session; a long campaign will need a restart.`);
   }
   return { momentum: mom, macro, moment };
 }

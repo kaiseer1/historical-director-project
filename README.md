@@ -291,6 +291,21 @@ problem first, for conversational play. This project read how VOTC does it and t
 three mechanisms to a different problem: auditing the shape of the map rather than voicing the people
 on it.
 
+**Three engine limits in this codebase are VOTC's findings, not ours.** They are documented in
+[issue #1](https://github.com/kaiseer1/historical-director-project/issues/1), contributed by the VOTC
+project as a postmortem of an afternoon spent discovering them the hard way:
+
+- CK3's log subsystem has a per-session **cumulative** write limit of roughly 17MB, after which it
+  stops logging until the game restarts — and **truncating the log from outside does not reset it**,
+  which was established by controlled experiment. Only the in-game `log.clearAll` does.
+- Fullscreen event windows silently kill console-created widgets, so an execution pump needs a
+  network of re-arm points rather than a single bootstrap.
+- Sibling states under one GUI widget are mutually exclusive state machines, and an extra one can
+  starve the others — a rule VOTC found by losing two implementations to it.
+
+Every one of those cost someone a real afternoon to find. Finding them second-hand, in a document,
+is the difference between this project surviving a long campaign and failing one silently.
+
 That inheritance is why every record this mod writes is prefixed `HD:`. VOTC's traffic is prefixed
 `VOTC:`, so the two remain disjoint in a shared `debug.log` and **both mods can be installed and run
 side by side.** The run files are separate for the same reason.

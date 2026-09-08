@@ -479,6 +479,87 @@ installed and running at once.
 
 ---
 
+## 7a. Engine limits discovered by the VOTC project
+
+Three things about CK3 that no amount of care in this codebase can prevent, only survive. All three
+were found and measured by the **Voices of the Court** project and written up in
+[issue #1](https://github.com/kaiseer1/historical-director-project/issues/1) on this repository. They
+are recorded here because each of them, left unhandled, ends a long campaign silently.
+
+### The 17MB wall
+
+**CK3's log subsystem has a per-session cumulative write limit of roughly 17MB.** Once it is reached,
+`debug.log` and `error.log` both stop writing and stay stopped until the game is restarted.
+
+The limit counts what the engine has *written*, not what is currently on disk. That distinction is
+the whole problem, and VOTC established it by controlled experiment rather than by argument:
+
+| Cleanup method | Peak file | Cumulative writes | Result |
+|---|---:|---:|---|
+| None | 17.3MB | 17.3MB | **Logging dead** |
+| External truncation at every 4MB | 13.4MB | 17.6MB | **Logging dead** |
+| In-game `log.clearAll` | 7.2MB | 59.6MB+ | Alive |
+
+So **truncating debug.log from outside does nothing.** Deleting it, rotating it, emptying it with
+another program — the engine goes on counting and dies at the same place. Only `log.clearAll`, which
+is an engine command, resets the engine's own counter.
+
+This matters more here than it did for VOTC. The Director is a heavy writer: one snapshot of a
+twenty-region sphere is several thousand lines, and an audit cadence of one in-game year will reach
+17MB in an afternoon.
+
+**What the orchestrator does about it.** It counts the bytes it reads and, past a threshold
+(`logClearThresholdMB`, default 4), asks the game to clear its own log. It cannot do this directly:
+`log.clearAll` is a console command, no effect in the game can run one, and the run file the
+orchestrator stages contains effects. Only a GUI widget can reach the console. So the request is a
+global variable, and a widget in the companion mod watches for it through a scripted GUI and runs the
+command. Four slots rotate, because a GUI state fires on a false-to-true edge and consecutive
+requests need distinct edges.
+
+The clear is never asked for while a staged batch is still waiting to be acknowledged. Clearing the
+log destroys the echo that batch is about to write, and the orchestrator would then report a dead
+pump for a batch that ran perfectly.
+
+You will see this in the activity log:
+
+```
+asked the game to clear its log (slot a, 4.1MB read since the last one)
+the game acknowledged the log-clear request (slot a)
+the game log was cleared after 4.1MB; CK3 can keep logging
+```
+
+The World tab shows how much of the budget is spent once it is past half.
+
+### Fullscreen event windows kill the pump
+
+**A fullscreen event window can silently destroy a console-created widget**, and the execution pump
+is one. VOTC reproduced this three times in an evening; it happens with any fullscreen event, not any
+particular one, and nothing on the mod side prevents it.
+
+The answer is not to stop the pump dying. It is to put resurrection points wherever it may just have
+been killed, which is every window this mod opens: the proposal notification, the macro event, and
+the moment acknowledgements all re-arm the pump when they appear. Under that sits a watchdog on
+`quarterly_playable_pulse` — quarterly rather than monthly because CK3 has no monthly global pulse;
+`yearly_global_pulse` is the only global one it offers.
+
+Each re-arm clears the pump before recreating it. Console commands run serially, so a pump that was
+still alive converges back to one instance instead of being doubled.
+
+### A dead pump and a dead log look identical
+
+Both present as silence: a staged batch is never acknowledged, and nothing arrives. They need
+opposite responses, so the orchestrator distinguishes them by watching the log file rather than the
+records in it.
+
+- If the game is still writing **anything** — its own chatter, other mods, warnings — the log
+  subsystem is alive and the silence is the pump's. The sidebar says so and offers the Recall
+  decision.
+- If the file has stopped growing **altogether**, the log subsystem is the suspect and the sidebar
+  says to restart CK3. Recall would not help, and would waste the time it takes to find that out.
+
+The first check has to be the second one, because when the log is exhausted every dead-pump symptom
+is present too — the echo cannot reach us either.
+
 ## 8. Quick reference
 
 ```bash
@@ -487,6 +568,7 @@ npm run doctor                  # diagnose the setup
 npm run deploy:mod              # after editing anything in mod/
 npm run check                   # the two verification scripts
 npm run smoke                   # the whole loop against a fake game, ~20s
+node scripts/check-resilience.mjs  # log-clear chain, re-arm mounts, stall banners
 npm run build:exe               # produce dist/HistoricalDirector.exe
 npm run smoke:exe               # the same loop, against that executable
 ```

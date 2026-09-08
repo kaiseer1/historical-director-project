@@ -177,6 +177,16 @@ button.decline:hover { background: var(--decline); color: #fff; }
 .warn p { margin: 0 0 8px; }
 .warn .effect { margin-top: 4px; user-select: all; }
 
+/* Worth knowing, not worth alarming about: the log-pressure line sits
+   between plain text and a warning, because a campaign approaching the clear
+   threshold is working exactly as intended. */
+.note {
+  background: color-mix(in srgb, var(--ink-faint) 8%, var(--card));
+  border: 1px solid var(--rule); border-radius: 3px;
+  padding: 10px 18px; margin-bottom: 22px;
+  font-size: 13px; color: var(--ink-faint);
+}
+
 .last-audit {
   margin: 16px 0 4px; font-size: 13px; color: var(--ink-faint);
   border-left: 2px solid var(--rule); padding: 4px 0 4px 14px;
