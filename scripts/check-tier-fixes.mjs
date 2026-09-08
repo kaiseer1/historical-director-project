@@ -22,6 +22,7 @@ import { momentumScript, MOMENTUM_KEYS, setMomentumSupport } from '../src/direct
 import { compareVersions, deployedModVersion, momentumSupport, macroSupport, momentSupport as resolveMomentSupport, MACRO_MIN_MOD, MOMENT_MIN_MOD, setObservedModVersion, observedModVersion } from '../src/setup/modVersion.js';
 import { setMacroSupport } from '../src/director/macroEvents.js';
 import { MOMENTS, MOMENT_KEYS, ALL_MOMENT_KEYS, setMomentSupport, applicableMoments, momentBriefing } from '../src/director/moments.js';
+import { snapshotScript } from '../src/bridge/ck3Script.js';
 import { preflight } from '../src/setup/preflight.js';
 import { LoreBook } from '../src/lore/LoreBook.js';
 import { INTENSITY, INTENSITY_KEYS, intensityBand, hasRegionData } from '../src/director/macroEvents.js';
@@ -2220,6 +2221,148 @@ const stage = (moment, st) => validateProposal({ action: 'historical_moment', ar
     'grouping is by effect, not by convenience',
   );
   fs.rmSync(file, { force: true });
+}
+
+// --- wars the Director could not see -----------------------------------------
+// The snapshot carried rank, size, culture, faith and geography, and not the
+// one fact that decides whether a claim means anything: who is already
+// fighting. County counts change only once a war has been *won*, so Castile and
+// Leon sat at 16 and 14 counties from July 1205 to March 1206 and the Director
+// read a peninsula mid-campaign as a peninsula at rest.
+
+/** A snapshot with two realms and whatever wars a case needs. */
+function snapshotWithWars(warLines = []) {
+  const a = new SnapshotAssembler();
+  const feed = (line) => {
+    const rec = parseLine('[00:00:00][effect.cpp:1]: ' + line);
+    return rec ? a.ingest(rec) : null;
+  };
+  feed('HD:/;/snapshot_begin/;/91/;/1205.7.12/;/440000/;/11');
+  feed('HD:/;/realm/;/11/;/Alfonso/;/Kingdom of Castile/;/Kingdom/;/16/;/Castilian/;/Catholic/;/Burgos/;/Jimena/;/House Jimena/;/yes/;/Feudal');
+  feed('HD:/;/realm/;/12/;/Alfonso IX/;/Kingdom of Leon/;/Kingdom/;/14/;/Castilian/;/Catholic/;/Leon/;/Jimena/;/House Jimena/;/yes/;/Feudal');
+  feed('HD:/;/realm_tier/;/11/;/kingdom');
+  feed('HD:/;/realm_tier/;/12/;/kingdom');
+  feed('HD:/;/realm_in_region/;/11/;/world_europe_west_iberia');
+  feed('HD:/;/realm_in_region/;/12/;/world_europe_west_iberia');
+  for (const w of warLines) feed(w);
+  const snap = feed('HD:/;/snapshot_end/;/91').snapshot;
+  for (const r of snap.realms) r.inNeighbourhood = true;
+  return snap;
+}
+
+{
+  const snap = snapshotWithWars(['HD:/;/war/;/11/;/12/;/Claim on the Kingdom of Leon']);
+  check(
+    'W1. a war reported over the wire reaches the snapshot',
+    snap.wars.length === 1 && snap.wars[0].attacker === 11 && snap.wars[0].defender === 12
+      && snap.wars[0].name === 'Claim on the Kingdom of Leon',
+    JSON.stringify(snap.wars[0] ?? null),
+  );
+}
+
+{
+  // Direction-insensitive: the question is whether these two are fighting, and
+  // which of them declared does not change the answer.
+  const snap = snapshotWithWars(['HD:/;/war/;/11/;/12/;/Claim on the Kingdom of Leon']);
+  check(
+    'W2. warBetween answers in either direction, and stays silent otherwise',
+    snap.warBetween(11, 12) !== null && snap.warBetween(12, 11) !== null && snap.warBetween(11, 99) === null,
+    'both directions matched, unrelated pair did not',
+  );
+}
+
+{
+  // The reason this was built. A claim cannot start a war against someone you
+  // are already fighting, so the claim sits idle - but 1000 gold, 1000 prestige
+  // and a 30-year war modifier land immediately, on a belligerent, mid-campaign.
+  const snap = snapshotWithWars(['HD:/;/war/;/11/;/12/;/Claim on the Kingdom of Leon']);
+  const r = validateProposal(
+    { action: 'grant_claim', args: { actor: 11, target: 12, momentum: 'none' } },
+    snap,
+    null,
+  );
+  check(
+    'W3. a claim between two realms already at war is refused',
+    !r.ok && /already at war/.test(r.error) && /war chest/.test(r.error),
+    r.ok ? 'ACCEPTED, granting a war chest mid-war' : r.error.slice(0, 130),
+  );
+}
+
+{
+  const snap = snapshotWithWars(['HD:/;/war/;/12/;/11/;/Claim on the Kingdom of Castile']);
+  const r = validateProposal(
+    { action: 'historical_moment', args: { moment: 'iberian_union', actor: 11, target: 12 } },
+    snap,
+    null,
+  );
+  check(
+    'W4. and so is a curated moment, including when the target is the attacker',
+    !r.ok && /already at war/.test(r.error),
+    r.ok ? 'ACCEPTED' : r.error.slice(0, 110),
+  );
+}
+
+{
+  // The guard must not become a blanket refusal. A war elsewhere says nothing
+  // about this pair.
+  const snap = snapshotWithWars(['HD:/;/war/;/11/;/77/;/Claim on somewhere else']);
+  const r = validateProposal(
+    { action: 'historical_moment', args: { moment: 'iberian_union', actor: 11, target: 12 } },
+    snap,
+    null,
+  );
+  check(
+    'W5. a war against a third party does not block the pair',
+    r.ok,
+    r.ok ? 'still proposable' : 'OVER-REFUSED: ' + r.error,
+  );
+}
+
+{
+  // Fails open where wars are not reported at all. A mod too old to emit them
+  // leaves no war list, and refusing every claim on that basis would break the
+  // toolkit for anyone who has not redeployed.
+  const snap = snapshotWithWars();
+  const noWars = { ...snap, warBetween: undefined };
+  const r = validateProposal(
+    { action: 'grant_claim', args: { actor: 11, target: 12, momentum: 'none' } },
+    noWars,
+    null,
+  );
+  check(
+    'W6. silence about wars is treated as "not observed", not as "no wars"',
+    r.ok,
+    r.ok ? 'old mod still works' : 'BROKE the old-mod path: ' + r.error,
+  );
+}
+
+{
+  // A ruler fighting on two fronts is not short of a casus belli, and the
+  // prompt says so per realm rather than making the model scan the list.
+  const snap = snapshotWithWars([
+    'HD:/;/war/;/11/;/12/;/Claim on the Kingdom of Leon',
+    'HD:/;/war/;/77/;/11/;/Claim on the Kingdom of Castile',
+  ]);
+  check(
+    'W7. warsOf finds a realm on both sides of the list',
+    snap.warsOf(11).length === 2 && snap.warsOf(12).length === 1 && snap.warsOf(5).length === 0,
+    'Castile in 2 wars, Leon in 1, a bystander in none',
+  );
+}
+
+{
+  // The emitted script has to be the script the game will actually run. Every
+  // name in it was checked against the game files first, because an unknown
+  // data function inside a quoted debug_log produces an unparseable line rather
+  // than an error - the failure class that once meant snapshots never arrived.
+  const lines = snapshotScript(['world_europe_west_iberia'], 90, ['world_europe_west_iberia']).join('\n');
+  check(
+    'W8. the snapshot script emits wars from the attacker, once each',
+    /every_character_war = \{/.test(lines)
+      && /limit = \{ primary_attacker = scope:hd_belligerent \}/.test(lines)
+      && /HD:\/;\/war\/;\/\[scope:hd_belligerent\.Char\.GetID\]\/;\/\[THIS\.Char\.GetID\]\/;\/\[scope:hd_war\.War\.GetName\]/.test(lines),
+    lines.split('\n').filter((l) => /war/i.test(l)).map((l) => l.trim()).join(' | ').slice(0, 200) || 'no war lines emitted',
+  );
 }
 
 try { fs.unlinkSync(tmp); } catch { /* already gone */ }

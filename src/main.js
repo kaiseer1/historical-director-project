@@ -298,7 +298,16 @@ tailer.on('record', async (rec) => {
       state.pending = null;
       runFile.clear();
       state.snapshot = out.snapshot;
-      log(`snapshot received: ${out.snapshot.realms.length} realms in ${out.snapshot.date}`);
+      // Wars named in the activity log rather than only in the prompt. The
+      // whole reason this exists is that the player could not see what the
+      // Director was reacting to, and a count on its own would leave them with
+      // the same question one step later.
+      const wars = out.snapshot.wars ?? [];
+      const naming = (id) => out.snapshot.realmsById.get(id)?.primaryTitle ?? `character ${id}`;
+      const warNote = wars.length
+        ? `; ${wars.length} war${wars.length === 1 ? '' : 's'} under way: ${wars.map((w) => `${naming(w.attacker)} -> ${naming(w.defender)}`).join(', ')}`
+        : '';
+      log(`snapshot received: ${out.snapshot.realms.length} realms in ${out.snapshot.date}${warNote}`);
 
       // The first snapshot of a campaign becomes the reference every later
       // audit measures drift against.

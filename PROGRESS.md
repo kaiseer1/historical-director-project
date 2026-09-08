@@ -6,11 +6,11 @@ Where the Historical Director actually stands, as distinct from what it is desig
 Kept honest: a thing is "working" here only if it has been watched working, and everything that has
 not been is listed as such.
 
-**Status:** v0.4.3 alpha · working branch `fix/wikidata-throttling`, unmerged and unpushed
-**Last live test:** 7 September 2026 — a 1178-1197 Emirate of Ghirnatah campaign, two hours
-unattended, roughly forty audits. Findings in section 3c.
-**Last harness test:** 8 September 2026 — 81 tier and gate cases, 8 region cases, 4 localisation
-cases, and the full loop end to end
+**Status:** v0.5.2 alpha · `main`, companion mod v0.5.1 deployed
+**Last live test:** 8 September 2026 — a 1193-1206 Kingdom of Castile campaign. Findings in sections
+3c and 3g; the moment library and the duplicate guard both came out of it.
+**Last harness test:** 8 September 2026 — 141 tier and gate cases, 8 region cases, 4 localisation
+cases, and the full loop end to end across all three smoke legs
 
 > **New to this project, or a fresh session?** Read **section 3c** first. It is the current state of
 > play: what the last live campaign proved, what was fixed because of it, and the one thing that was
@@ -362,6 +362,60 @@ Two existing cases changed with it, and both were asserting more than their data
 tested the wording of a refusal rather than the refusal; the other opened with "it saw the whole
 opening map of *its sphere*" over a baseline that had recorded no sphere at all. The premise is now
 stated in the test.
+
+## 3g. Wars, which nobody could see, v0.5.2
+
+For five versions the snapshot carried a realm's rank, size, culture, faith, dynasty, government and
+geography, and not the one fact that decides whether a claim means anything: who is already fighting.
+
+The consequence was not subtle once it was named. County counts change only when a war is **won**, so
+Castile at 16 counties and Leon at 14 from July 1205 to March 1206 read as a peninsula at rest, and
+the Director had no way to tell that from a peninsula in the middle of a campaign. It licensed claims
+on both readings alike. Worse, it could not observe whether a ruler had ever acted on what it granted
+— which means every magnitude in `momentum.js` and `moments.js` was a dial nobody could read.
+
+**What the mod now emits.** One record per war, from the attacker's side only, inside the same
+per-realm loop that already writes the realm lines:
+
+```
+HD:/;/war/;/<attacker id>/;/<defender id>/;/<war name>
+```
+
+Reporting from one side means each war appears once instead of twice. The cost is that a war whose
+attacker sits outside the sphere goes unseen even when its defender is inside it; the sphere already
+bounds perception everywhere else, and de-duplicating in script would buy a second pass for nothing.
+
+**Every name in that script was checked against the game files before it was written**, because an
+unknown data function inside a quoted `debug_log` yields an unparseable line rather than an error —
+the same failure class that once meant snapshots never arrived at all. `every_character_war` (88
+uses), `primary_attacker` as a war-scope trigger (584), `primary_defender` as a scope link in effect
+context (`00_prison_interactions.txt`, `war_on_actions.txt`), and the `.War.` cast from
+`core_l_english.yml:544`. `GetPrimaryAttacker` and `GetPrimaryDefender` do not exist anywhere in
+`gui/`, `common/` or `events/`, which is why the defender is reached by scope rather than
+interpolated.
+
+**The guard that follows from it.** `grant_claim` and `historical_moment` now refuse a pair already at
+war with each other. A pressed claim cannot start a war against someone you are already fighting, so
+the claim itself would sit idle — but the 1000 gold, 1000 prestige and multi-year war modifier beside
+it land immediately, on a belligerent, mid-campaign. That is not setting a stage; it is reinforcing
+one side of a fight already in progress, and nothing in the preview would have told the player so.
+
+It fails **open** where wars are not reported at all. A mod too old to emit them leaves no war list,
+and refusing every claim on that basis would break the toolkit for anyone who has not redeployed.
+Silence means "not observed", which is also what the prompt section says in as many words rather than
+leaving the model to read an empty list as peace.
+
+**Also visible now in the activity log**, named rather than counted, because the reason this was built
+is that the player could not see what the Director was reacting to and a bare count leaves them with
+the same question one step later:
+
+```
+snapshot received: 5 realms in 1218.4.2; 1 war under way: the banu zahir Empire -> Kingdom of Navarra
+```
+
+**Orchestrator-side only.** `snapshotScript` is generated into `run/hd.txt` and executed by the mod's
+existing pump, so this is **no mod change, no redeploy, no CK3 restart** — restarting `npm start` is
+enough.
 
 ---
 

@@ -33,6 +33,8 @@ export class SnapshotAssembler {
           realms: [],
           /** @type {Map<number, string[]>} filled before the realms exist */
           regionsById: new Map(),
+          /** @type {Array<{attacker: number, defender: number, name: string}>} */
+          wars: [],
         };
         return null;
 
@@ -152,6 +154,19 @@ export class SnapshotAssembler {
       case 'date':
         return { type: 'date', date: rec.fields[0], totalDays: Number(rec.fields[1]) || 0 };
 
+      case 'war': {
+        // Who is fighting whom, and what the game calls it. Buffered with the
+        // rest of the snapshot rather than returned as an event, because a war
+        // is context for the next audit and never a trigger for one.
+        if (!this.pending) return null;
+        const attacker = Number(rec.fields[0]);
+        const defender = Number(rec.fields[1]);
+        if (Number.isFinite(attacker) && Number.isFinite(defender)) {
+          this.pending.wars.push({ attacker, defender, name: rec.fields[2] ?? '' });
+        }
+        return null;
+      }
+
       case 'mod_version':
         // What the running game has loaded, which is not the same question as
         // what is deployed on disk. Emitted from hd_mark_alive, so it arrives
@@ -183,6 +198,7 @@ export class SnapshotAssembler {
  * @param {{token: string, date: string, totalDays: number, playerId: number, realms: any[]}} snap
  */
 function finalise(snap) {
+  const wars = snap.wars ?? [];
   const realmsById = new Map(snap.realms.map((r) => [r.id, r]));
 
   // Geography, attached now that every realm exists. Buffered on the way in
@@ -200,6 +216,28 @@ function finalise(snap) {
     player: realmsById.get(snap.playerId) ?? null,
     /** Largest realms first: drift shows up at the top of the table. */
     byFootprint,
+    wars,
+    /**
+     * Is a war under way between these two, in either direction?
+     *
+     * Direction-insensitive on purpose. What the toolkit needs to know is
+     * whether these two are already fighting; which of them declared is a
+     * different question, and not one that changes the answer.
+     *
+     * @param {number} a
+     * @param {number} b
+     */
+    warBetween: (a, b) => wars.find(
+      (w) => (w.attacker === a && w.defender === b) || (w.attacker === b && w.defender === a),
+    ) ?? null,
+    /**
+     * Every war either of these two is fighting, against anyone.
+     *
+     * A ruler already at war on two fronts is not short of a casus belli.
+     *
+     * @param {number} id
+     */
+    warsOf: (id) => wars.filter((w) => w.attacker === id || w.defender === id),
     /**
      * The order the prompt table is truncated in.
      *

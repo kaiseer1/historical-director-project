@@ -149,6 +149,36 @@ function requireLocality(state, ids, what) {
 }
 
 /**
+ * Refuse a claim between two realms already at war with each other.
+ *
+ * A pressed claim cannot start a war against someone you are already fighting,
+ * so the claim itself sits idle - but the gold, the prestige and the multi-year
+ * war modifier beside it do not. Granting those mid-war is not setting a stage,
+ * it is reinforcing one side of a fight already in progress, and the player
+ * approving the card would have no way to know that from the preview.
+ *
+ * Fails open where wars are not reported at all: a mod too old to emit them
+ * leaves `wars` undefined, and refusing every claim on that basis would break
+ * the toolkit for anyone who has not redeployed. Silence here means "not
+ * observed", which is the same thing the war section tells the model.
+ *
+ * @param {any} state
+ * @param {number} a
+ * @param {number} b
+ * @param {string} what
+ * @returns {string|null}
+ */
+function refuseIfAtWar(state, a, b, what) {
+  if (typeof state?.warBetween !== 'function') return null;
+  const war = state.warBetween(a, b);
+  if (!war) return null;
+  const attacker = state.realmsById?.get(war.attacker);
+  const defender = state.realmsById?.get(war.defender);
+  const who = `${attacker?.primaryTitle ?? `character ${war.attacker}`} is already at war with ${defender?.primaryTitle ?? `character ${war.defender}`}`;
+  return `${what} is pointless here and its war chest is not: ${who}${war.name ? ` (${war.name})` : ''}, so the claim could not be pressed until that war ends, while the gold, prestige and war modifier would land immediately on a belligerent mid-campaign`;
+}
+
+/**
  * The clause a preview gains when one party is far away.
  *
  * The rule permits an action where *either* party is near, so a proposal can
@@ -456,6 +486,10 @@ export const TOOLKIT = {
       // snapshot already carries the faiths needed to say so.
       const justified = MOMENTUM[momentum].requires(state.realmsById.get(actor), state.realmsById.get(target));
       if (justified) return justified;
+
+      // Whether the war this claim would justify is already being fought.
+      const fighting = refuseIfAtWar(state, actor, target, 'grant_claim');
+      if (fighting) return fighting;
 
       // And last, whether this is the Director's war to arrange at all.
       return requireLocality(state, [actor, target], 'grant_claim');
@@ -881,6 +915,9 @@ export const TOOLKIT = {
       // name.
       const tier = targetTierError(key, state.realmsById.get(target)?.tierKey);
       if (tier) return tier;
+
+      const fightingAlready = refuseIfAtWar(state, actor, target, `${key}`);
+      if (fightingAlready) return fightingAlready;
 
       return requireLocality(state, [actor, target], 'historical_moment');
     },

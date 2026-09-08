@@ -220,6 +220,9 @@ setTimeout(() => {
     // dropped with "has stood at empire tier since the campaign began".
     checks.push(['the mid-campaign gate lets a proposal through', /the Director has [1-9]\d* proposal/]);
     checks.push(['the sphere is seeded from the whole realm', /where the realm holds land/]);
+    // Wars were invisible for five versions: the snapshot carried rank, size,
+    // culture, faith and geography, and not who was already fighting.
+    checks.push(['wars reach the orchestrator', /1 war under way: the banu zahir Empire -> Kingdom of Navarra/]);
   }
 
   let failed = 0;

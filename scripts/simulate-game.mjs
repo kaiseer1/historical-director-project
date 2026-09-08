@@ -75,6 +75,11 @@ const SCENARIOS = {
       [3004, 'Federico', 'Empire of Italia', 'Empire', 22, 'Italian', 'Catholic', 'Palermo', 'Hohenstaufen', 'House Hohenstaufen', 'yes', 'Feudal'],
       [3005, 'Alfonso IX', 'Kingdom of Leon', 'Kingdom', 11, 'Castilian', 'Catholic', 'Leon', 'Jimena', 'House Jimena', 'yes', 'Feudal'],
     ],
+    // A war already being fought, so the smoke run exercises the whole path
+    // rather than only the empty case. Navarra is the smallest realm on the
+    // board and is being invaded by the largest: the Director should be able to
+    // see that before it offers anyone a claim on Pamplona.
+    wars: [[3001, 3002, 'Conquest of Navarra']],
   },
 };
 
@@ -123,8 +128,15 @@ function emitSnapshot(token) {
       }
     }
   }
+  // Wars, emitted after the realms exactly as the mod does: the real script
+  // reports them from inside the same per-realm loop that writes the realm
+  // lines, one record per war, from the attacker's side only.
+  for (const [attacker, defender, name] of scenario.wars ?? []) {
+    emit(`HD:/;/war/;/${attacker}/;/${defender}/;/${name}`);
+  }
   emit(`HD:/;/snapshot_end/;/${token}`);
-  console.log(`[sim] answered snapshot ${token}: ${scenario.realms.length} realms`);
+  const wars = (scenario.wars ?? []).length;
+  console.log(`[sim] answered snapshot ${token}: ${scenario.realms.length} realms${wars ? `, ${wars} war(s)` : ''}`);
 }
 
 // Play the role of the execution pump: notice staged script and respond.

@@ -104,6 +104,43 @@ function vanishedSection(snapshot, baseline) {
 }
 
 /**
+ * The wars actually being fought right now.
+ *
+ * Until this arrived the Director judged the map by county counts, which only
+ * change once a war has been *won*. Castile and Leon sat at 16 and 14 counties
+ * from July 1205 to March 1206 and the Director read that as stasis - it could
+ * not tell a peninsula at peace from one in the middle of a campaign, and
+ * licensed claims on both alike.
+ *
+ * Only wars whose attacker is inside the sphere are reported; that is stated
+ * here rather than left for the model to infer from an empty list.
+ *
+ * @param {any} snapshot
+ */
+function warSection(snapshot) {
+  const wars = snapshot.wars ?? [];
+  if (wars.length === 0) {
+    return [
+      '## Wars under way',
+      'None reported. The mod reports a war from its attacker, and only for realms inside the sphere, so a war begun by someone outside it would not appear here.',
+      '',
+    ];
+  }
+
+  const name = (id) => {
+    const r = snapshot.realmsById?.get(id);
+    return r ? `${r.ruler} of ${r.primaryTitle}` : `character ${id}`;
+  };
+
+  return [
+    '## Wars under way',
+    'These are being fought as you read this. A realm already at war does not need a casus belli, and one being invaded is not drifting from the record by choice.',
+    ...wars.map((w) => `- ${name(w.attacker)} is attacking ${name(w.defender)}${w.name ? ` (${w.name})` : ''}`),
+    '',
+  ];
+}
+
+/**
  * The Historical Director.
  *
  * Runs one audit: take the world as the mod reported it, retrieve what the
@@ -378,6 +415,7 @@ export class Director {
       '',
       ...(briefing ? ['## The record at the nearest bookmark', briefing, ''] : []),
       ...(moments ? ['## Curated moments that fit this date', moments, ''] : []),
+      ...warSection(snapshot),
       ...vanishedSection(snapshot, this.baseline),
       '## Retrieved historical evidence',
       evidenceBlock,

@@ -252,6 +252,28 @@ export function snapshotScript(regions, token, homeRegions = [], nearRegions = [
     '\t\tdebug_log = "HD:/;/realm_near/;/[THIS.Char.GetID]"',
     '\t\tremove_variable = hd_near',
     '\t}',
+    // Wars this realm has started.
+    //
+    // The Director could see every realm's rank, size, culture, faith and
+    // geography, and not that two of them were already fighting. So it could
+    // licence a claim for a war under way, and - with no way to see whether a
+    // ruler ever acted on what it granted - every number in momentum.js and
+    // moments.js was a dial nobody could read. County counts only reveal a war
+    // once it has been won.
+    //
+    // Reported from the attacker's side alone, so each war appears once instead
+    // of twice. A war whose attacker sits outside the sphere therefore goes
+    // unseen even when its defender is inside it: the sphere already bounds
+    // perception everywhere else, and de-duplicating in script would cost a
+    // second pass for nothing.
+    '\tsave_scope_as = hd_belligerent',
+    '\tevery_character_war = {',
+    '\t\tlimit = { primary_attacker = scope:hd_belligerent }',
+    '\t\tsave_scope_as = hd_war',
+    '\t\tprimary_defender = {',
+    '\t\t\tdebug_log = "HD:/;/war/;/[scope:hd_belligerent.Char.GetID]/;/[THIS.Char.GetID]/;/[scope:hd_war.War.GetName]"',
+    '\t\t}',
+    '\t}',
     '\tremove_variable = hd_counties',
     '\tchange_global_variable = { name = hd_idx add = 1 }',
     '}',
