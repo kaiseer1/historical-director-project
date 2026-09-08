@@ -18,7 +18,7 @@ import { Baseline } from '../src/model/Baseline.js';
 import { AuditClock } from '../src/model/AuditClock.js';
 import { validateProposal } from '../src/director/toolkit.js';
 import { momentumScript, MOMENTUM_KEYS, setMomentumSupport } from '../src/director/momentum.js';
-import { compareVersions, deployedModVersion, momentumSupport, macroSupport, MACRO_MIN_MOD } from '../src/setup/modVersion.js';
+import { compareVersions, deployedModVersion, momentumSupport, macroSupport, momentSupport as resolveMomentSupport, MACRO_MIN_MOD, MOMENT_MIN_MOD, setObservedModVersion, observedModVersion } from '../src/setup/modVersion.js';
 import { setMacroSupport } from '../src/director/macroEvents.js';
 import { MOMENTS, MOMENT_KEYS, ALL_MOMENT_KEYS, setMomentSupport } from '../src/director/moments.js';
 import { preflight } from '../src/setup/preflight.js';
@@ -1749,6 +1749,102 @@ const moment = (args, st) => validateProposal({ action: 'historical_moment', arg
     'H9. every offered moment names mod content that exists',
     missing.length === 0,
     missing.length ? missing.join('; ') : MOMENT_KEYS.length + ' moments, all their events and modifiers defined',
+  );
+}
+
+// --- what the running game loaded -------------------------------------------
+// The descriptor answers "what is deployed" and the gate treated that as "what
+// can the game execute". They part company in exactly one window: after a
+// deploy and before CK3 restarts. In that window the gate reported a feature as
+// available while the loaded mod had none of it - the precise failure the gate
+// exists to prevent, arriving through the check itself. The mod now reports its
+// own version on every batch, and that answer wins.
+
+/** A CK3 folder with a mod of the given version deployed. */
+function deployedAt(version) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hd-obs-'));
+  const inner = path.join(dir, 'mod', 'historical_director');
+  fs.mkdirSync(inner, { recursive: true });
+  fs.writeFileSync(path.join(inner, 'descriptor.mod'), 'version="' + version + '"\n', 'utf8');
+  return dir;
+}
+
+{
+  // The live situation: 0.5.0 on disk, an older mod still loaded in the running
+  // game. Disk alone would say yes.
+  const dir = deployedAt('0.5.0');
+  setObservedModVersion(null);
+  const byDisk = resolveMomentSupport(dir);
+
+  setObservedModVersion('0.4.3');
+  const byGame = resolveMomentSupport(dir);
+  setObservedModVersion(null);
+
+  check(
+    'V1. the running game overrides the descriptor, and the descriptor alone would be wrong',
+    byDisk.ok && !byGame.ok && byGame.version === '0.4.3' && byGame.source === 'game',
+    'disk said available; the game said v0.4.3 and it is not',
+  );
+  check(
+    'V1b. and the refusal names the right fix - restart, not redeploy',
+    /restart CK3 to pick it up/.test(byGame.reason) && !/npm run deploy:mod/.test(byGame.reason),
+    byGame.reason,
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  // Genuinely stale on disk too: the fix really is a deploy, and the message
+  // must not tell them to restart into the same old mod.
+  const dir = deployedAt('0.4.3');
+  setObservedModVersion('0.4.3');
+  const r = resolveMomentSupport(dir);
+  setObservedModVersion(null);
+  check(
+    'V2. when disk is stale too, the fix named is the deploy',
+    !r.ok && /npm run deploy:mod/.test(r.reason),
+    r.reason,
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  const dir = deployedAt('0.5.1');
+  setObservedModVersion('0.5.1');
+  const r = resolveMomentSupport(dir);
+  setObservedModVersion(null);
+  check(
+    'V3. a game running a current mod enables the library',
+    r.ok && r.source === 'game' && r.version === '0.5.1',
+    'v' + r.version + ' reported by the game, ' + MOMENT_MIN_MOD + ' required',
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  // Before the pump has run once there is no report, and saying so is the
+  // honest state rather than pretending disk is the answer to a question it
+  // cannot answer.
+  setObservedModVersion(null);
+  check(
+    'V4. nothing is observed until the game says so',
+    observedModVersion() === null,
+    'null before the first batch, not a guess',
+  );
+}
+
+{
+  // The version the mod reports is a literal in its own script, and the
+  // descriptor is a literal in another file. Two places holding one truth is
+  // how they drift, so this asserts they have not.
+  const descriptor = fs.readFileSync(path.join(ROOT_DIR, 'mod', 'descriptor.mod'), 'utf8');
+  const effects = fs.readFileSync(path.join(ROOT_DIR, 'mod', 'common', 'scripted_effects', 'hd_perception_effects.txt'), 'utf8');
+  const declared = descriptor.match(/version\s*=\s*"([^"]+)"/)?.[1] ?? null;
+  const reported = effects.match(/HD:\/;\/mod_version\/;\/([0-9.]+)/)?.[1] ?? null;
+  check(
+    'V5. the version the mod reports matches the version it declares',
+    declared !== null && reported !== null && declared === reported,
+    'descriptor ' + declared + ', reported ' + reported,
   );
 }
 

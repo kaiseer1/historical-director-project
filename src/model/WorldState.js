@@ -140,6 +140,12 @@ export class SnapshotAssembler {
       case 'date':
         return { type: 'date', date: rec.fields[0], totalDays: Number(rec.fields[1]) || 0 };
 
+      case 'mod_version':
+        // What the running game has loaded, which is not the same question as
+        // what is deployed on disk. Emitted from hd_mark_alive, so it arrives
+        // with the first batch the pump executes rather than at the next tick.
+        return { type: 'modVersion', version: rec.fields[0] ?? '' };
+
       case 'applied':
         return { type: 'applied', token: rec.fields[0], action: rec.fields[1], subject: rec.fields[2] };
 

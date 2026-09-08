@@ -84,40 +84,76 @@ export function deployedModVersion(ck3UserFolder) {
 }
 
 /**
- * Whether the deployed mod is new enough for one feature, and if not, what to
- * tell the player. The reason is shown verbatim in the sidebar and in a
- * dropped-proposal line, so it names the fix rather than only the fault.
+ * What the running game has loaded, when it has told us.
  *
- * Written once and called twice on purpose. Momentum had this check and macro
- * events did not, which is exactly how the gap reopened; a second hand-written
- * copy of the same logic is how it would reopen again.
+ * The descriptor on disk answers "what is deployed", and for a long time this
+ * module treated that as the same question as "what can the game execute". It
+ * is not, and the two part company in exactly one window: after a deploy and
+ * before CK3 restarts. In that window the gate reported a feature as available
+ * while the loaded mod had none of it - the precise failure the gate exists to
+ * prevent, arriving through the check itself.
+ *
+ * The mod now reports its own version through the wire on every batch, and that
+ * answer wins when we have it. Null until the game says otherwise, which is the
+ * honest state before the pump has run once.
+ *
+ * @type {string|null}
+ */
+let observed = null;
+
+/** @param {string|null} version as reported by the running game */
+export function setObservedModVersion(version) {
+  observed = version ? String(version).trim() : null;
+}
+
+/** @returns {string|null} */
+export function observedModVersion() {
+  return observed;
+}
+
+/**
+ * Whether the mod is new enough for one feature, and if not, what to tell the
+ * player. The reason is shown verbatim in the sidebar and in a dropped-proposal
+ * line, so it names the fix rather than only the fault - and which fix depends
+ * on *why* it is too old.
+ *
+ * Written once and called three times on purpose. Momentum had this check and
+ * macro events did not, which is exactly how the gap reopened; a second
+ * hand-written copy of the same logic is how it would reopen again.
  *
  * @param {string} ck3UserFolder
  * @param {string} minVersion
  * @param {string} feature what the player asked for, named in the refusal
  * @param {string} defines what the newer mod provides, so the reason explains itself
- * @returns {{ok: boolean, version: string|null, reason: string}}
+ * @returns {{ok: boolean, version: string|null, deployed: string|null, source: 'game'|'disk'|'none', reason: string}}
  */
 function featureSupport(ck3UserFolder, minVersion, feature, defines) {
-  const version = deployedModVersion(ck3UserFolder);
+  const deployed = deployedModVersion(ck3UserFolder);
+  const version = observed ?? deployed;
+  const source = observed ? 'game' : deployed ? 'disk' : 'none';
 
   if (!version) {
     return {
       ok: false,
       version: null,
+      deployed,
+      source,
       reason: `the companion mod is not deployed, so ${feature} cannot be executed. Run: npm run deploy:mod`,
     };
   }
 
   if (compareVersions(version, minVersion) < 0) {
-    return {
-      ok: false,
-      version,
-      reason: `the deployed companion mod is v${version} and ${feature} needs v${minVersion} or newer, which is where ${defines} are defined. Run: npm run deploy:mod, then restart CK3`,
-    };
+    // Two different faults with two different fixes, and telling them apart is
+    // the whole point of asking the game. A loaded mod older than the deployed
+    // one needs a restart, not another deploy.
+    const stale = observed && deployed && compareVersions(deployed, minVersion) >= 0;
+    const reason = stale
+      ? `the running game has companion mod v${version} loaded and ${feature} needs v${minVersion} or newer, which is where ${defines} are defined. v${deployed} is already deployed, so restart CK3 to pick it up`
+      : `the ${source === 'game' ? 'running game has companion mod' : 'deployed companion mod is'} v${version} and ${feature} needs v${minVersion} or newer, which is where ${defines} are defined. Run: npm run deploy:mod, then restart CK3`;
+    return { ok: false, version, deployed, source, reason };
   }
 
-  return { ok: true, version, reason: '' };
+  return { ok: true, version, deployed, source, reason: '' };
 }
 
 /** @param {string} ck3UserFolder */

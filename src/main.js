@@ -20,7 +20,7 @@ import { preflight, problemCount } from './setup/preflight.js';
 // Two similarly named things, kept apart on purpose: modVersion's resolves the
 // answer by reading the deployed descriptor, momentum's reports the answer the
 // toolkit is currently acting on.
-import { momentumSupport as resolveMomentumSupport, macroSupport as resolveMacroSupport, momentSupport as resolveMomentSupport } from './setup/modVersion.js';
+import { momentumSupport as resolveMomentumSupport, macroSupport as resolveMacroSupport, momentSupport as resolveMomentSupport, setObservedModVersion, observedModVersion } from './setup/modVersion.js';
 import { setMomentumSupport, momentumSupport as momentumSupportState } from './director/momentum.js';
 import { setMacroSupport, macroSupport as macroSupportState } from './director/macroEvents.js';
 import { setMomentSupport, momentSupport as momentSupportState } from './director/moments.js';
@@ -318,6 +318,18 @@ tailer.on('record', async (rec) => {
         break;
       }
       await runAudit();
+      break;
+    }
+
+    case 'modVersion': {
+      // The running game answering what it actually loaded. Only re-resolve when
+      // it changes, so this costs one descriptor read per session rather than
+      // one per batch.
+      if (out.version === observedModVersion()) break;
+      setObservedModVersion(out.version);
+      log(`the running game reports companion mod v${out.version}`);
+      checkModCapabilities();
+      broadcast('state', publicState());
       break;
     }
 

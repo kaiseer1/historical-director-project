@@ -38,4 +38,20 @@ hd_heartbeat = {
 # from anything the game does on its own.
 hd_mark_alive = {
 	set_global_variable = { name = hd_pump_alive value = 1 }
+
+	# What the *running game* has loaded, which is not the same question as what
+	# is deployed on disk. The orchestrator gates several actions on the mod
+	# being new enough to execute them, and it could only read the descriptor -
+	# so in the window between deploying a new version and restarting CK3 it
+	# would report a feature as available while the loaded mod had none of it.
+	# That is the exact failure those gates exist to prevent, arriving through
+	# the check itself.
+	#
+	# Reported from here because this runs at the top of every batch, so the
+	# answer arrives with the orchestrator's first request rather than at the
+	# next yearly tick.
+	#
+	# The literal below must equal descriptor.mod. check-tier-fixes.mjs asserts
+	# that it does, because two places holding one truth is how they drift.
+	debug_log = "HD:/;/mod_version/;/0.5.1"
 }
