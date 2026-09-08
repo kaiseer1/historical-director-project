@@ -174,7 +174,7 @@ export class SnapshotAssembler {
         const defender = Number(rec.fields[2]);
         if (!Number.isFinite(id) || !Number.isFinite(attacker) || !Number.isFinite(defender)) return null;
         if (!this.pending.warsById.has(id)) {
-          this.pending.warsById.set(id, { id, attacker, defender, name: rec.fields[3] ?? '' });
+          this.pending.warsById.set(id, { id, attacker, defender, name: cleanWarName(rec.fields[3]) });
         }
         return null;
       }
@@ -209,6 +209,38 @@ export class SnapshotAssembler {
 /**
  * @param {{token: string, date: string, totalDays: number, playerId: number, realms: any[]}} snap
  */
+/**
+ * A war name with CK3's own markup taken out of it.
+ *
+ * `War.GetName` returns the string the game would render in its UI, not the
+ * string it would show a reader, and a live probe returned 128 wars looking
+ * like this:
+ *
+ *   ONCLICK:TITLE,11849 TOOLTIP:LANDED_TITLE,11849 L; Tsang!!! Claim on the
+ *   ONCLICK:TITLE,11773 TOOLTIP:LANDED_TITLE,11773 L; Duchy of Yarlung!!!
+ *
+ * The click targets, tooltip bindings and format markers are instructions to a
+ * renderer that does not exist here. Left in, they would reach the model as if
+ * they were part of the war's name and reach the player in the activity log,
+ * and the one thing worse than a war the Director cannot see is a war it
+ * describes in a language nobody reads.
+ *
+ * Deliberately conservative: it removes the directives and the `!!` span
+ * terminators and keeps every word between them, so an unrecognised marker
+ * leaves an odd name rather than an empty one.
+ *
+ * @param {string} raw
+ */
+export function cleanWarName(raw) {
+  return String(raw ?? '')
+    .replace(/\b(?:ONCLICK|TOOLTIP):\S+/g, ' ')
+    .replace(/(^|\s)[A-Za-z];\s*/g, '$1')
+    .replace(/#[!\w]+/g, ' ')
+    .replace(/!!+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function finalise(snap) {
   const wars = [...(snap.warsById ?? new Map()).values()];
   const realmsById = new Map(snap.realms.map((r) => [r.id, r]));

@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SnapshotAssembler, renderRealmTable } from '../src/model/WorldState.js';
+import { SnapshotAssembler, renderRealmTable, cleanWarName } from '../src/model/WorldState.js';
 import { parseLine } from '../src/bridge/protocol.js';
 import { Baseline } from '../src/model/Baseline.js';
 import { AuditClock } from '../src/model/AuditClock.js';
@@ -2394,6 +2394,54 @@ function snapshotWithWars(warLines = []) {
       && !/scope:hd_war/.test(lines)
       && /HD:\/;\/war\/;\/\[THIS\.War\.GetID\]\/;\/\[THIS\.War\.GetActiveCB\.GetAttacker\.GetID\]\/;\/\[THIS\.War\.GetActiveCB\.GetDefender\.GetID\]\/;\/\[THIS\.War\.GetName\]/.test(lines),
     lines.split('\n').filter((l) => /war/i.test(l)).map((l) => l.trim()).join(' | ').slice(0, 200) || 'no war lines emitted',
+  );
+}
+
+// --- war names as the game actually returns them -----------------------------
+// War.GetName returns the string the game would render in its UI, not the one
+// it would show a reader. A live probe of 128 wars came back full of click
+// targets and tooltip bindings: instructions to a renderer that does not exist
+// here, which would otherwise reach the model as part of the war's name.
+
+{
+  const raw = 'ONCLICK:TITLE,11849 TOOLTIP:LANDED_TITLE,11849 L; Tsang!!! Claim on the ONCLICK:TITLE,11773 TOOLTIP:LANDED_TITLE,11773 L; Duchy of Yarlung!!!';
+  check(
+    'W9. markup is stripped and every word between it is kept',
+    cleanWarName(raw) === 'Tsang Claim on the Duchy of Yarlung',
+    cleanWarName(raw),
+  );
+}
+
+{
+  // The other shape the probe returned: a game-concept tooltip rather than a
+  // title link, and a two-bang span terminator rather than three.
+  const raw = 'E; TOOLTIP:GAME_CONCEPT,holy_war Holy War!! for the ONCLICK:TITLE,3177 TOOLTIP:LANDED_TITLE,3177 L; Kingdom of Lithuania!!!';
+  check(
+    'W10. and concept tooltips go the same way',
+    cleanWarName(raw) === 'Holy War for the Kingdom of Lithuania',
+    cleanWarName(raw),
+  );
+}
+
+{
+  // Most war names carry no markup at all, and must come through untouched.
+  check(
+    'W11. a plain name is left exactly as it was',
+    cleanWarName('Independence War') === 'Independence War'
+      && cleanWarName('Buryat Daoxue Nomadic Uprising') === 'Buryat Daoxue Nomadic Uprising',
+    'unchanged',
+  );
+}
+
+{
+  // Conservative by design: an unrecognised marker should leave an odd name
+  // rather than an empty one, because an empty name reads as "no war name" and
+  // that is a different claim.
+  check(
+    'W12. an unfamiliar marker degrades to an odd name, never to nothing',
+    cleanWarName('WHATSIT:THING,4 Siege of Zaragoza') === 'WHATSIT:THING,4 Siege of Zaragoza'
+      && cleanWarName('') === '',
+    cleanWarName('WHATSIT:THING,4 Siege of Zaragoza'),
   );
 }
 
