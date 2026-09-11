@@ -27,7 +27,7 @@ import { parseLine } from './protocol.js';
  * **The count is seeded from what is already on disk.** CK3 truncates its logs
  * on launch, so in a running session the size of debug.log is a lower bound on
  * what the engine has written since the last clear. Starting at zero measured
- * the orchestrator's own uptime instead - and PROGRESS.md actively recommends
+ * the orchestrator's own uptime instead - and the project's own guide recommended
  * restarting `npm start` to pick up changes, which reset the count every time
  * while the engine's counter carried on climbing.
  *

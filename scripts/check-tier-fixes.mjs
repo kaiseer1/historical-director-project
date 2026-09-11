@@ -370,7 +370,7 @@ const FRANCE = { id: 1, ruler: 'Philippe', title: 'Kingdom of France', rank: 'Ki
 }
 
 {
-  // The case from PROGRESS.md section 3, end to end.
+  // The case from the v0.2 live campaign, end to end.
   const realm = { id: 9, ruler: 'Zahir III', title: 'the banu zahir Empire', rank: 'Empire', tierKey: 'empire', counties: 65 };
   const b = baselineAt(1218, realm);
   const now = snapshot({ token: '9', date: '1222.1.1', totalDays: 446000, realms: [realm] });

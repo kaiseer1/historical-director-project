@@ -53,7 +53,7 @@ const SCENARIOS = {
       [2003, 'Muhammad I', 'Duchy of Sicily', 'Duchy', 4, 'Berber', 'Sunni', 'Palermo', 'Aghlabid', 'House Aghlabid', 'yes', 'Feudal'],
     ],
   },
-  // Cordoba, 1218. Modelled on the campaign in PROGRESS.md section 3: an
+  // Cordoba, 1218. Modelled on the live campaign behind the v0.2 fixes: an
   // alt-history Andalusian empire spanning Iberia, the Maghreb and Sicily,
   // joined from an existing save so the baseline is captured mid-campaign.
   //
