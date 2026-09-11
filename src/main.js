@@ -1,7 +1,7 @@
 import { loadConfig, describeConfig } from './config.js';
 import { LogTailer } from './bridge/LogTailer.js';
 import { LogBudget, clearGapMs } from './bridge/LogBudget.js';
-import { assess as assessLiveness } from './bridge/Liveness.js';
+import { assess as assessLiveness, DEFAULT_ACK_MS } from './bridge/Liveness.js';
 import { RunFileManager } from './bridge/RunFileManager.js';
 import { SnapshotAssembler, belligerentName } from './model/WorldState.js';
 import { LoreBook } from './lore/LoreBook.js';
@@ -498,6 +498,50 @@ function findProposal(id) {
   return state.proposals.find((p) => p.id === id);
 }
 
+/**
+ * Is there a staged batch that might still be executed?
+ *
+ * There is one run file and one pump reading it, and `approve` writes straight
+ * over whatever is in there. Nothing stopped it doing that on top of a batch
+ * still waiting to be picked up: two proposals approved inside one pump
+ * interval, and the first was overwritten before the pump ever saw it. No
+ * `applied` record, no `refused` record, and `awaitingApply` replaced by the
+ * second approval so the silence was never even noticed - while the Lore Book
+ * already carried the first as approved, which is what suppresses it from every
+ * later audit. An action that never reached the game, recorded as done, and
+ * never proposed again.
+ *
+ * That is the silent loss of a staged command, which is issue #1 section 3.1
+ * wearing this project's clothes, and it is the one failure this design cannot
+ * afford: every other path in the toolkit reports itself, including the ones
+ * where the game says no.
+ *
+ * `ackPending` has known this since the log budget was written - "the staged
+ * file is not ours to overwrite" is its own comment. `approve` simply never
+ * asked it.
+ *
+ * Past the acknowledgment window the answer flips, and deliberately. A batch
+ * nobody has picked up in fifteen seconds is one `checkLiveness` has already
+ * given up on and told the player about, so holding approvals behind it would
+ * leave the sidebar permanently inert on a dead pump - refusing to act on
+ * account of a batch that is never going to run. Waiting on a live pump is
+ * correct; waiting on a dead one is the same mistake in the other direction.
+ *
+ * @returns {string|null} why this approval must wait, or null to proceed
+ */
+function stagedBatchInFlight() {
+  if (!ackPending()) return null;
+  if (state.pendingSince && Date.now() - state.pendingSince > DEFAULT_ACK_MS) return null;
+
+  if (state.awaitingApply) {
+    return 'the game has not finished the last approved action yet.'
+      + ` Still waiting on: ${state.awaitingApply.proposal.preview.slice(0, 80)}.`
+      + ' Try again in a moment - approving now would overwrite it before the game read it.';
+  }
+  return 'the Director is mid-question with the game (a snapshot is staged and unanswered).'
+    + ' Try again in a moment - approving now would overwrite it.';
+}
+
 function approve({ id }) {
   const p = findProposal(id);
   if (!p) return { error: 'no such proposal' };
@@ -505,9 +549,24 @@ function approve({ id }) {
   const action = TOOLKIT[p.action];
   if (!action) return { error: `toolkit no longer has ${p.action}` };
 
+  // Checked before anything is recorded. An approval refused here has not
+  // happened at all: the proposal stays in the list, the ledger is untouched,
+  // and the player can approve it again in a second or two.
+  const wait = stagedBatchInFlight();
+  if (wait) {
+    log(`approval held: ${wait}`);
+    return { error: wait };
+  }
+
   const token = runFile.nextToken();
   runFile.write(actionScript(action.toScript(p.args, token, state.snapshot)), token);
   state.awaitingApply = { token, proposal: p };
+  // Stamped here, not left at whatever the last snapshot set. checkLiveness
+  // measures the acknowledgment window from pendingSince, so without this an
+  // approved action inherited a timestamp from an unrelated earlier request and
+  // could be declared unacknowledged the moment it was staged - or, worse, be
+  // given far longer than it should before anyone noticed it had gone missing.
+  state.pendingSince = Date.now();
 
   loreBook.record({
     date: p.date, year: p.year, verdict: 'approved', action: p.action,

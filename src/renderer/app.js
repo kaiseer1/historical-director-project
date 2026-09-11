@@ -207,8 +207,27 @@ function renderProposal(p) {
 }
 
 async function rule(id, verdict, card) {
-  card.querySelectorAll('button').forEach((b) => (b.disabled = true));
-  await post(verdict, { id });
+  const buttons = [...card.querySelectorAll('button')];
+  buttons.forEach((b) => (b.disabled = true));
+  const res = await post(verdict, { id });
+
+  // A verdict the orchestrator refused has to give the card back. The one
+  // reason it refuses is that a batch is already staged and unanswered - the
+  // run file is single, and writing over a batch the pump has not read yet
+  // loses it silently - which clears in a pump tick or two. A card left inert
+  // after that would be the sidebar dropping a proposal the orchestrator is
+  // still holding, and the player with no way to tell that from a decline.
+  if (res?.error) {
+    buttons.forEach((b) => (b.disabled = false));
+    let note = card.querySelector('.verdict-note');
+    if (!note) {
+      note = el('p', 'warn verdict-note');
+      card.appendChild(note);
+    }
+    note.textContent = res.error;
+    return;
+  }
+  card.querySelector('.verdict-note')?.remove();
 }
 
 function renderWorld() {

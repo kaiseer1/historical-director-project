@@ -537,5 +537,60 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
   );
 }
 
+// --------------------------------------------------------------------------
+// The staged batch is single, and approving twice used to lose the first one
+// --------------------------------------------------------------------------
+//
+// There is one run file and one pump. approve() wrote over it unconditionally,
+// so two approvals inside one pump interval overwrote the first batch before it
+// was ever read: no applied record, no refused record, and the Lore Book
+// already carrying it as done - which suppresses it from every later audit.
+//
+// These are source checks rather than behavioural ones, for the same reason the
+// mod checks above are: the failure needs a live game and two clicks two
+// seconds apart to reproduce, and a check nobody can run is not a check.
+{
+  const main = read('src/main.js');
+  const approveBlock = main.slice(main.indexOf('function approve('), main.indexOf('function decline('));
+
+  check(
+    'A1. approve consults the in-flight guard before staging anything',
+    /stagedBatchInFlight\(\)/.test(approveBlock),
+    'ackPending has always known the staged file is not ours to overwrite',
+  );
+
+  check(
+    'A2. and refuses before the ledger is touched, not after',
+    approveBlock.indexOf('stagedBatchInFlight()') < approveBlock.indexOf('loreBook.record'),
+    'a held approval must not be recorded as one that happened',
+  );
+
+  check(
+    'A3. an approval stamps its own pendingSince',
+    /state\.awaitingApply = \{ token, proposal: p \};[\s\S]{0,600}state\.pendingSince = Date\.now\(\)/.test(approveBlock),
+    'checkLiveness measures the ack window from it; a stale stamp mistimes both directions',
+  );
+
+  const guard = main.slice(main.indexOf('function stagedBatchInFlight('), main.indexOf('function approve('));
+  check(
+    'A4. the guard expires, so a dead pump cannot block the sidebar forever',
+    /DEFAULT_ACK_MS/.test(guard),
+    'past the window the batch is one checkLiveness has already given up on',
+  );
+}
+
+{
+  // The server can refuse a verdict now, so the card has to come back. A card
+  // whose buttons stay disabled after a refusal is the sidebar dropping a
+  // proposal the orchestrator still holds.
+  const app = read('src/renderer/app.js');
+  const ruleBlock = app.slice(app.indexOf('async function rule('), app.indexOf('function renderWorld('));
+  check(
+    'A5. a refused verdict re-enables the card rather than leaving it inert',
+    /res\?\.error/.test(ruleBlock) && /disabled = false/.test(ruleBlock),
+    'the refusal clears in a pump tick or two and the player has to be able to retry',
+  );
+}
+
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);
