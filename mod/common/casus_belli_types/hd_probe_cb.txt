@@ -1,0 +1,36 @@
+﻿# Historical Director - PROBE ONLY. Delete before release.
+#
+# Modelled on hd_conquest_of_majorca_cb, which is itself modelled on vanilla's
+# raiktor_claim_cb. The only thing being tested is whether war_name can be
+# built from the title the war is fought over rather than being a literal.
+
+hd_probe_dynamic_cb = {
+	icon = claim
+	group = event
+
+	should_show_war_goal_subview = yes
+	mutually_exclusive_titles = { always = yes }
+	allow_hostages = no
+
+	allowed_for_character = {}
+	allowed_for_character_display_regardless = {}
+	allowed_against_character = {}
+	target_titles = claim
+	target_title_tier = all
+	target_de_jure_regions_above = yes
+	ignore_effect = change_title_holder
+
+	valid_to_start = { always = no }
+
+	should_invalidate = {}
+	on_invalidated_desc = msg_invasion_war_invalidated_message
+
+	cost = {}
+
+	on_declaration = { on_declared_war = yes }
+
+	war_name = "HD_PROBE_WAR_NAME"
+	my_war_name = "HD_PROBE_WAR_NAME"
+	war_name_base = "HD_PROBE_WAR_NAME"
+	cb_name = "HD_PROBE_CB_NAME"
+}
