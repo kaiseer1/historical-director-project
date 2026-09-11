@@ -15,7 +15,9 @@
     "sphereMax": 12,
     "maxRealmsInPrompt": 60,
     "maxProposalsPerAudit": 2,
-    "requireApproval": true
+    "requireApproval": true,
+    "pumpIntervalSeconds": 2,
+    "logClearThresholdMB": 4
   },
   "knowledge": {
     "enabled": true,

@@ -78,7 +78,7 @@ export function assess(s) {
       kind: 'log_exhausted',
       text: 'Log subsystem may be exhausted. Restart CK3 to restore logging.',
       detail: nearWall
-        ? `Nothing has been written to debug.log for ${Math.round(lineSilence / 1000)}s, and ${mb(s.bytesSinceClear)} has gone through it since the last clear. CK3 stops logging after about 17MB in a session and only a restart brings it back. Anything staged since then may have executed in game without us seeing it.`
+        ? `Nothing has been written to debug.log for ${Math.round(lineSilence / 1000)}s, and ${mb(s.bytesSinceClear)} has gone through it since the last clear. CK3 can stop logging after as little as 17MB in a session, and only a restart brings it back. Anything staged since then may have executed in game without us seeing it.`
         : `Nothing has been written to debug.log for ${Math.round(lineSilence / 1000)}s - not our records, not the game's own. That is the log subsystem rather than the pump, and only restarting CK3 restores it.`,
     };
   }

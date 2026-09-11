@@ -21,6 +21,35 @@
  * a single snapshot of a wide sphere emits thousands of lines - so this is not
  * a theoretical ceiling for it. It is a wall a long campaign will hit.
  *
+ * ## Where the ceiling has not reproduced
+ *
+ * On this machine it has not. A session on 2026-09-08 ran three hours from
+ * 17:26, wrote 34.6MB to debug.log, was still writing when it was measured,
+ * and had never once called `log.clearAll` - twice the stated wall with no
+ * clear at all. In the same session error.log took 24.8MB in three and a half
+ * minutes and stopped dead mid-line while debug.log carried on, which is not
+ * the "both files stop together" that a single shared counter predicts.
+ *
+ * A second session on 2026-09-11 repeated it, and with this mod disabled in
+ * the playset, so none of it was the Director's doing: error.log wrote 27.9MB
+ * in ten minutes and went silent mid-burst at 00:16:13, while debug.log carried
+ * on for another fifty minutes to 35.8MB. Its quiet-stretch baseline had been
+ * eight lines a second, and its last line was a decision trigger that fires on
+ * every evaluation, so the file died rather than the errors stopping. Two for
+ * two: error.log dies somewhere around 25-28MB during a heavy burst, and
+ * debug.log does not die at 17MB.
+ *
+ * That is one install disagreeing with another, not a refutation: VOTC's three
+ * controlled runs are better evidence about their machine than a single
+ * observation is about every machine, and the difference may be CK3 version,
+ * or write *rate* rather than cumulative total - their probe emitted 6-13MB in
+ * bursts where this writes steadily.
+ *
+ * So the threshold stays where it is. Being early costs a cleared log, which
+ * costs nothing; being late costs the campaign's remaining visibility. What
+ * changed instead is the accounting, which was genuinely wrong in the unsafe
+ * direction - see bridge/LogTailer.js.
+ *
  * ## Why this is a request rather than a call
  *
  * `log.clearAll` is a console command, and nothing in effect script can run
@@ -49,6 +78,31 @@ const MB = 1024 * 1024;
  */
 export const CLEAR_SLOTS = ['a', 'b', 'c', 'd'];
 
+/**
+ * How long to wait between two clear requests, given the pump's interval.
+ *
+ * Was a flat thirty seconds, and a live campaign outran it. Played at speed on a
+ * 56-mod list, the logs took in 46.8MB in the thirty seconds around one new
+ * year - the yearly pulse evaluating everything at once - and error.log, which
+ * has died at 24.8MB and at 27.9MB before, was at 24MB when the next clear
+ * landed. Logging survived that window; the gap was the part that was wrong.
+ *
+ * The gap only has to be long enough that a second request is never a
+ * duplicate of the first: a request is picked up within one pump tick and the
+ * tailer sees the log shrink within half a second, so anything past a tick and
+ * a bit is safe. It must also outlast the run file's retirement of the
+ * previous request, which main.js schedules two ticks after staging it - a new
+ * request staged inside that window would be wiped before the pump read it.
+ * Three ticks, floored at eight seconds, satisfies both with room to spare.
+ *
+ * @param {number} pumpIntervalSeconds
+ * @returns {number} milliseconds
+ */
+export function clearGapMs(pumpIntervalSeconds) {
+  const tick = (Number(pumpIntervalSeconds) > 0 ? Number(pumpIntervalSeconds) : 2) * 1000;
+  return Math.max(8_000, tick * 3);
+}
+
 export class LogBudget {
   /**
    * @param {{thresholdMB?: number, minGapMs?: number}} [opts]
@@ -72,6 +126,9 @@ export class LogBudget {
      * next poll, so without this the budget would still read "over" on the
      * next tick and fire a second request into a second slot for the same
      * overage - burning the rotation four times over in two seconds.
+     *
+     * The orchestrator passes clearGapMs(pump interval) rather than relying on
+     * this default, which is too slow for a campaign played at speed.
      */
     this.minGapMs = opts.minGapMs ?? 30_000;
 

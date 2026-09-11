@@ -44,6 +44,17 @@ window = {
 		state = {
 			name = _show2
 			trigger_on_create = yes
+			# HD_PUMP_INTERVAL - rewritten at deploy time from
+			# director.pumpIntervalSeconds; see src/setup/deployMod.js. The
+			# literal below is the default and is what a hand-copied mod gets.
+			#
+			# It is not only a latency knob. Every `run` executed from here
+			# makes CK3 re-walk its whole script database and re-report every
+			# unset variable and flag in every loaded mod - measured live on
+			# 2026-09-08 at 315 error.log lines per tick, of which 10 were
+			# ours and 305 belonged to other mods. That cost is linear in this
+			# number and in how many mods are loaded, so a heavy modlist may
+			# want 5 or 10 here where a clean install can leave it at 2.
 			duration = 2
 			on_finish = "[ExecuteConsoleCommand('gui.createwidget gui/custom_gui/hd_runner.gui hd_runner_counter')]"
 		}

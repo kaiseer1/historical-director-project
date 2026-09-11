@@ -53,5 +53,5 @@ hd_mark_alive = {
 	#
 	# The literal below must equal descriptor.mod. check-tier-fixes.mjs asserts
 	# that it does, because two places holding one truth is how they drift.
-	debug_log = "HD:/;/mod_version/;/0.6.0"
+	debug_log = "HD:/;/mod_version/;/0.10.0"
 }

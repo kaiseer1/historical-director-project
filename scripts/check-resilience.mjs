@@ -17,8 +17,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LogTailer } from '../src/bridge/LogTailer.js';
-import { LogBudget, CLEAR_SLOTS } from '../src/bridge/LogBudget.js';
+import { LogBudget, CLEAR_SLOTS, clearGapMs } from '../src/bridge/LogBudget.js';
 import { assess } from '../src/bridge/Liveness.js';
+import { applyPumpInterval } from '../src/setup/deployMod.js';
 import { SnapshotAssembler } from '../src/model/WorldState.js';
 import { parseLine } from '../src/bridge/protocol.js';
 
@@ -133,6 +134,25 @@ console.log('\nHistorical Director - engine resilience\n');
   );
 }
 
+{
+  // The gap between clears has to outlast the run file's retirement of the
+  // previous request - two pump ticks, CLEAR_RETIRE_MS in main.js - or a new
+  // request can be wiped before the pump reads it. And it has to be short
+  // enough to keep up with a campaign played at speed, which a flat thirty
+  // seconds was not.
+  const bad = [];
+  for (let s = 1; s <= 30; s += 1) {
+    const gap = clearGapMs(s);
+    const retire = Math.max(3_000, s * 1000 * 2);
+    if (gap <= retire) bad.push(`${s}s pump: gap ${gap}ms <= retire ${retire}ms`);
+  }
+  check(
+    "B9. the clear gap outlasts the previous request's retirement at every pump interval, and is 8s by default",
+    bad.length === 0 && clearGapMs(2) === 8_000 && clearGapMs(undefined) === 8_000,
+    bad.length ? bad.join('; ') : `8s at a 2s pump, ${clearGapMs(10) / 1000}s at 10s, ${clearGapMs(30) / 1000}s at 30s`,
+  );
+}
+
 // --- the tailer --------------------------------------------------------------
 
 /** A tailer over a scratch file, polled by hand rather than on a timer. */
@@ -204,6 +224,108 @@ function scratchTailer() {
     `${t.bytesTotal}B total, ${t.bytesSinceClear}B since the clear`,
   );
   cleanup();
+}
+
+{
+  // The correction from the 2026-09-08 session. `start()` seeks to the end of
+  // the file so stale records are not replayed - but the budget is a claim
+  // about what the *engine* has written, and on a running game that is
+  // everything already on disk. Starting it at zero measured the orchestrator's
+  // uptime, which is reset every time `npm start` is restarted.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hd-seed-'));
+  const file = path.join(dir, 'debug.log');
+  fs.writeFileSync(file, 'x'.repeat(3 * MB));
+  const t = new LogTailer(file);
+  t.start();
+  t.stop();
+  check(
+    'T4. a tailer attaching mid-session inherits what the engine already wrote',
+    t.bytesSinceClear === 3 * MB && t.offset === 3 * MB,
+    `${(t.bytesSinceClear / MB).toFixed(1)}MB seeded, reading from ${t.offset}`,
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  // error.log is never read and always counted: the engine's limit is shared
+  // between the two files. In the live session that prompted this, error.log
+  // took 24.8MB in three and a half minutes from another mod's repeating
+  // script error - the larger half of the bill, and previously invisible.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hd-err-'));
+  const file = path.join(dir, 'debug.log');
+  const errFile = path.join(dir, 'error.log');
+  fs.writeFileSync(file, '');
+  fs.writeFileSync(errFile, '');
+  const t = new LogTailer(file, { errorLogPath: errFile });
+  t.start();
+  t.stop();
+
+  const seen = [];
+  t.on('record', (r) => seen.push(r.kind));
+  fs.appendFileSync(errFile, 'e'.repeat(2 * MB));
+  t.poll();
+  check(
+    'T5. bytes spent on error.log are charged to the budget, unread',
+    t.bytesSinceClear === 2 * MB && t.bytesTotal === 0 && seen.length === 0,
+    `${(t.bytesSinceClear / MB).toFixed(1)}MB charged, ${t.bytesTotal}B read`,
+  );
+
+  // And a clear resets both, because log.clearAll truncates both.
+  fs.writeFileSync(errFile, '');
+  fs.writeFileSync(file, '');
+  fs.appendFileSync(file, '[00:00:00][effect.cpp:1]: HD:/;/date/;/1201.1.1/;/438365\n');
+  t.offset = 10_000; // pretend we had read that far, so the shrink is detected
+  t.poll();
+  check(
+    'T6. and a clear forgives them, since the engine has forgotten them too',
+    t.bytesSinceClear < 1000 && t.clears === 1,
+    `${t.bytesSinceClear}B carried past the clear`,
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  // The pump interval is the one setting that lives in the mod rather than the
+  // orchestrator, because it is a `duration` inside a GUI state and there is no
+  // way to read a global variable from one. So it is substituted on the way to
+  // disk, and these are the cases that substitution has to get right.
+  const runner = fs.readFileSync(
+    path.join(fileURLToPath(new URL('..', import.meta.url)), 'mod', 'gui', 'custom_gui', 'hd_runner.gui'),
+    'utf8',
+  );
+
+  check(
+    'P1. the shipped widget carries the marker the deploy substitutes on',
+    /# HD_PUMP_INTERVAL/.test(runner) && /duration = 2/.test(runner),
+    'marker present, default 2s',
+  );
+
+  const ten = applyPumpInterval(runner, 10);
+  check(
+    'P2. a configured interval reaches the widget',
+    ten.applied && /duration = 10/.test(ten.text) && !/duration = 2/.test(ten.text),
+    ten.applied ? 'duration = 10' : 'marker did not match',
+  );
+
+  // The substitution must not touch the other durations in the file - the log
+  // clear slots have their own states, and rewriting one of those would change
+  // when the log is cleared rather than how often the pump runs.
+  const others = (runner.match(/duration = /g) ?? []).length;
+  const othersAfter = (ten.text.match(/duration = /g) ?? []).length;
+  check(
+    'P3. and touches nothing else in the file',
+    others === othersAfter && ten.text.length - runner.length <= 2,
+    `${others} duration lines before, ${othersAfter} after`,
+  );
+
+  // A mod file without the marker still deploys, at its own default. Failing
+  // the whole deploy over a widget tweak would be the larger harm.
+  const bare = applyPumpInterval('duration = 2\n', 10);
+  check(
+    'P4. a file without the marker is left alone rather than failing the deploy',
+    !bare.applied && bare.text === 'duration = 2\n',
+    'unchanged, applied=false',
+  );
 }
 
 // --- telling the two silences apart -----------------------------------------

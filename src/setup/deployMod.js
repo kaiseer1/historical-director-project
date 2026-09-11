@@ -19,11 +19,42 @@ import { readAsset, listAssets } from '../runtime.js';
 export const MOD_NAME = 'historical_director';
 
 /**
+ * Rewrite the pump interval in the runner widget on its way to disk.
+ *
+ * The one piece of the mod that is not shipped verbatim. The interval is a
+ * `duration` inside a GUI state, so it cannot be read from a global variable or
+ * pushed in through the run file the way everything else is - the value has to
+ * be in the file the engine loads. Deploy time is the only moment the
+ * orchestrator holds both the config and the file.
+ *
+ * Marked in the source with `# HD_PUMP_INTERVAL` on the line above, so the
+ * substitution is greppable from the mod side and the shipped file stays valid
+ * CK3 script for anyone who copies it by hand.
+ *
+ * Returns the body unchanged when the marker is missing rather than throwing:
+ * a mod whose interval could not be set still runs at its default, and failing
+ * the whole deploy over it would be the larger harm.
+ *
+ * @param {string} body
+ * @param {number} seconds
+ * @returns {{text: string, applied: boolean}}
+ */
+export function applyPumpInterval(body, seconds) {
+  const marker = /(# HD_PUMP_INTERVAL[\s\S]*?\n\s*duration = )\d+(?:\.\d+)?/;
+  if (!marker.test(body)) return { text: body, applied: false };
+  return { text: body.replace(marker, `$1${seconds}`), applied: true };
+}
+
+/** The widget file the interval lives in. */
+const RUNNER_ASSET = 'mod/gui/custom_gui/hd_runner.gui';
+
+/**
  * @param {string} ck3UserFolder the Paradox user folder, not the game install
- * @returns {{ok: true, dest: string, descriptorPath: string, files: number}
+ * @param {{pumpIntervalSeconds?: number}} [opts]
+ * @returns {{ok: true, dest: string, descriptorPath: string, files: number, pumpIntervalSeconds: number}
  *          | {ok: false, error: string, modFolder: string}}
  */
-export function deployMod(ck3UserFolder) {
+export function deployMod(ck3UserFolder, opts = {}) {
   const modFolder = path.join(ck3UserFolder, 'mod');
   const dest = path.join(modFolder, MOD_NAME);
 
@@ -46,10 +77,18 @@ export function deployMod(ck3UserFolder) {
   // sends - which fails as a wrong answer rather than as a missing one.
   fs.rmSync(dest, { recursive: true, force: true });
 
+  const interval = Number.isFinite(opts.pumpIntervalSeconds) && Number(opts.pumpIntervalSeconds) > 0
+    ? Math.round(Number(opts.pumpIntervalSeconds))
+    : 2;
+
   let written = 0;
   for (const asset of assets) {
-    const body = readAsset(asset);
+    let body = readAsset(asset);
     if (!body) continue;
+    if (asset === RUNNER_ASSET) {
+      const { text } = applyPumpInterval(body.toString('utf8'), interval);
+      body = Buffer.from(text, 'utf8');
+    }
     // "mod/common/x.txt" -> "<dest>/common/x.txt"
     const rel = asset.replace(/^mod\//, '');
     const full = path.join(dest, rel);
@@ -66,7 +105,7 @@ export function deployMod(ck3UserFolder) {
   fs.writeFileSync(descriptorPath, deployed, 'utf8');
   fs.writeFileSync(path.join(dest, 'descriptor.mod'), deployed, 'utf8');
 
-  return { ok: true, dest, descriptorPath, files: written };
+  return { ok: true, dest, descriptorPath, files: written, pumpIntervalSeconds: interval };
 }
 
 /** Whether a deployed copy is already present. */

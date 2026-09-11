@@ -565,6 +565,323 @@ Neither is guessed at silently; both are marked in the files that contain them.
 
 ---
 
+
+## 3i. The log budget was measuring the wrong session, v0.6.1
+
+The accounting added in 3h was wrong in the unsafe direction, and a live session on this machine is
+what showed it. At 20:21 on 2026-09-08, CK3 had been running since 17:26 and had written **34.6MB**
+to `debug.log`. A tailer attached at that moment would have reported **0MB spent**.
+
+Two causes, both fixed:
+
+- **`bytesSinceClear` started at zero.** Reading starts at the end of the file, which is right —
+  replaying old records would fire stale snapshots at the Director. But the *budget* is a claim about
+  what the engine has written, and starting it at zero measured the orchestrator's own uptime
+  instead. This document recommends restarting `npm start` to pick up changes; every one of those
+  restarts silently forgave the whole bill. It is now seeded from what is already on disk, which in a
+  running session is a lower bound on what the engine has written since the last clear.
+- **`error.log` was not counted at all.** The limit is shared between the two files. In that same
+  session `error.log` took **24.8MB in three and a half minutes** — another mod's repeating script
+  error — and was never on the books. It is now counted and still never read.
+
+### The 17MB figure did not reproduce here
+
+Recorded because the number is load-bearing and this is evidence against it:
+
+| | VOTC's measurement | This machine, 2026-09-08 |
+|---|---|---|
+| debug.log | dead at ~17.3MB | **34.6MB and still writing** |
+| error.log | died with debug.log | stopped at 24.8MB, mid-line, while debug.log carried on |
+| `log.clearAll` calls | required to survive | **zero, all session** |
+
+That is one install disagreeing with another rather than a refutation — three controlled runs are
+better evidence about their machine than one observation is about every machine, and the difference
+may be CK3 version or write *rate* rather than cumulative total, since their probe emitted 6–13MB in
+bursts where this writes steadily. **So the threshold has not been raised.** Being early costs a
+cleared log, which costs nothing. Being late costs the campaign's remaining visibility.
+
+### And the fix from 3h had never actually run
+
+The running game reported `HD:/;/mod_version/;/0.5.1`. The deployed mod had no `hd_log_clear` slots
+and no re-arm widget — the whole of 3h existed in the repository and in no campaign. The version gate
+was correctly refusing to request a clear, which is why the log-clear chain shows zero activity in a
+34MB session: the machinery worked, and had nothing to work on.
+
+Worth noting *how* that was caught. The mod reports its own version through the wire on every batch,
+so the running game contradicted the descriptor on disk. That is the technique VOTC recommends in
+§5 of issue #1 after `copy2` mtimes misled them for an afternoon, and it was already built here.
+
+## 3j. The Almohad collapse, v0.7.0
+
+The second macro action, and the counterpart to `iberian_pressure` rather than a variant of it.
+
+**Why a second action and not a fourth intensity.** `iberian_pressure` describes a peninsula
+gathering around a unifier and is supported by how much ground the Andalusian realms still hold.
+This describes a power coming apart from the inside and is supported by how little. They act on
+opposite parties and are licensed by opposite evidence, and a 13th-century peninsula can carry both
+at once — Castile consolidating while the Almohads disintegrate is the historical case, not a
+contradiction. `collapseBand` is deliberately the mirror image of `intensityBand`, and a test asserts
+that a world supporting the strongest pressure supports no collapse at all.
+
+**The history it is modelling.** Las Navas de Tolosa in 1212 did not destroy the Almohad state; it
+destroyed its authority in al-Andalus. What followed was disintegration rather than conquest — Ibn
+Hud in Murcia in 1228, Ibn al-Ahmar founding the Nasrid emirate at Granada in 1238, the third taifas
+emerging from provinces whose governors stopped answering. Only then did the Christian crowns take
+the pieces: Cordoba 1236, Valencia 1238, Seville 1248. The order is the whole design. The Almohads
+were not beaten and then divided; they were divided and then beaten in detail.
+
+So the weight is on vassals leaving, not on armies losing. `vassal_opinion` is the lever, because
+vanilla's independence faction reads liege opinion directly: `common/factions/00_factions.txt` scores
+joining at `OPINION_MULTIPLIER = -0.4` against a base reluctance of `-150`.
+
+**There is no CK3 modifier that raises faction chance.** Checked rather than assumed: no `faction_*`
+key exists anywhere in the game's modifier localisation, and the scoring lives in
+`common/scripted_modifiers/00_faction_modifiers.txt`, which a mod can only reach by replacing a
+150-line vanilla block wholesale — a fight with every other faction-touching mod and with every
+patch. So the requested 40% is a per-vassal `random = { chance = 40 }` in the event, gated on the
+engine's own `can_create_faction`.
+
+**Where this crosses the Director's line, stated rather than buried.** Every other action licenses
+and equips and then leaves the ruler to decide. This one moves a vassal who did not choose to move.
+Three things keep it inside the rules: the engine keeps its veto through `can_create_faction`; what
+is created is a *faction*, which is a demand and a war that can still be lost, not a title transfer;
+and the preview states the odds in words — "a two-in-five chance, rolled separately for each landed
+vassal" — before anyone approves anything. A test asserts that sentence is in the preview, and
+another asserts that the number in the preview equals the number the event rolls, because those two
+live in different files and drift is how a sidebar starts lying.
+
+The larger half of the effect is not the roll at all. It is the standing `vassal_opinion` penalty and
+a timed opinion modifier, which go on feeding vanilla's own scoring for twenty-five years after the
+event is forgotten.
+
+**Severity band.** Andalusian counties as a share of Iberian counties: ≥ 0.6 refuses outright
+("a power in possession of the peninsula rather than one coming apart in it"), ≥ 0.4 admits
+`fraying`, ≥ 0.2 admits `breaking`, below that admits `shattered`. The baseline sharpens it where an
+Andalusian realm has actually lost rank or ground since the campaign began.
+
+**Gated at mod v0.7.0.** Five character modifiers, an opinion modifier and three events all live in
+the mod, so a v0.6.0 mod would run the batch, report `applied ... ok`, and do none of it. A fifth
+threshold rather than a bump of an existing one, for the reason `MOMENT_MIN_MOD` gives: the features
+are independent.
+
+**Not yet watched in a live game.** The band, the refusals, the script and the preview are covered by
+13 cases in `check-tier-fixes.mjs`. What no test can confirm is the CK3 side: that
+`can_create_faction` and `create_faction` behave inside an `every_vassal` loop the way the vanilla
+vassal interaction uses them, and that the defection actually appears in the faction list. That needs
+a campaign.
+
+
+## 3k. What the pump itself costs, and the interval as a setting
+
+**Every `run` re-validates the world.** Watched live on 2026-09-08: each time the pump executed
+`run hd.txt`, CK3 re-walked its entire script database and re-reported every unset variable and flag
+in every loaded mod — about 315 `error.log` lines per tick, 3,110 notices in a sample, **30 of them
+ours and 3,080 other mods'**. At a two-second cadence that was roughly 158 lines a second, and the
+single largest driver of log volume in the session. The Director's snapshots were not close.
+
+**The encoding warning was a marker, not the cause.** Each of those ticks also logged
+`File 'run/hd.txt' should be in utf8-bom encoding` — 13 ticks, 13 warnings. The run file is now
+written with a BOM, which is what CK3 asks for and what VOTC specifies for its own run file in issue #1
+§2.2. After the change: 10 ticks, **0 warnings — and still 315 lines per tick.** The BOM is correct and
+removed one line per tick; the revalidation is inherent to `run` and did not move.
+
+**The control.** On 2026-09-11 the same modlist ran with this mod disabled in the playset. Quiet-stretch
+baseline: about 8 `error.log` lines a second. With the pump at two seconds it had been about 158. The
+pump raises the steady error rate roughly twentyfold on a heavy modlist, and the cost is linear in
+both the pump rate and the number of mods loaded. On a clean install it would be a handful of lines.
+
+**So the interval is now a setting: `director.pumpIntervalSeconds`**, default 2, clamped to 1–30. It is
+the only setting that lives in the mod rather than the orchestrator — it is a `duration` inside a GUI
+state, and nothing can read a global variable from one — so `deployMod` rewrites it into
+`hd_runner.gui` on the way to disk, at a line marked `# HD_PUMP_INTERVAL`. Changing it needs
+`npm run deploy:mod` and a CK3 restart.
+
+The timings that depended on two seconds now scale off it instead, and one of them was a latent bug:
+
+| | was | now |
+|---|---|---|
+| pump-dead timeout | 25s | max(25s, 5 × interval) |
+| ack window | 15s | max(configured, 4 × interval) |
+| clear-request retire | **3s** | max(3s, 2 × interval) |
+
+The last one would have broken silently. A clear request was staged and the run file retired three
+seconds later — fine at a two-second pump, but at five or ten seconds the request would be written and
+wiped between two ticks, so the log would never clear and the budget would ask again forever. Four
+cases in `check-resilience.mjs` cover the substitution: the marker ships, a configured value reaches
+the widget, nothing else in the file is touched, and a file without the marker deploys at its default
+rather than failing.
+
+### error.log dies; debug.log does not
+
+Two sessions, the same shape:
+
+| | error.log stopped | debug.log |
+|---|---|---|
+| 2026-09-08, HD enabled | 24.8MB, mid-burst at 17:29:41 | carried on to 34.6MB |
+| 2026-09-11, HD disabled | 27.9MB, mid-burst at 00:16:13 | carried on to 35.8MB |
+
+Both times the last line was a trigger that fires on every evaluation, so the file stopped rather than
+the errors. That is not the single shared ~17MB counter issue #1 describes, and it is recorded in
+`LogBudget.js` as a disagreement between installs rather than a refutation. The code comments that
+asserted the limit was shared have been corrected.
+
+It still argues for counting `error.log` in the budget, for a sharper reason than before: `error.log` is
+the only place a broken mod effect reports itself. On 2026-09-11 it was dead ten minutes in. A
+collapse approved after that point could have failed inside `create_faction` and nothing would ever
+have said so.
+
+
+## 3l. Historical wars: the record's events, not only its pressures, v0.8.0
+
+A Director card in a live 1217 campaign proposed a `grant_claim` from Aragon on the Balearics, with
+reconquista momentum. The history in its prose was right — James I took Majorca in 1229 — and the tool
+was wrong twice over: a claim is a licence the AI may use in 1219 or in 1260, and the record gives a
+war and a date. It was approved, so that campaign now carries the licence.
+
+**What changed in the project's rules.** Every action until now said "it transfers no titles and
+starts no wars". `historical_war` starts one: on approval, the war the record names begins under its
+own casus belli and carries its own name, and CK3 fights it. The approval gate is untouched — nothing
+reaches the game until the player presses Approve — so the human-in-the-loop design survives. What
+changed is how much the Director may do once it is pressed.
+
+**Paradox's own pattern.** `bookmark_events.txt` starts a historical war from script:
+`start_war = { cb = raiktor_claim_cb ... }`, then finds it with `random_character_war ... using_cb`
+and tilts it with `spawn_army`. `hd_conquest_of_majorca_cb` follows `raiktor_claim_cb` line for line:
+`group = event` and `valid_to_start = { always = no }`, so nobody can declare it by hand, and
+`target_titles = claim`, so it fights over the claim the batch grants first. A war's name comes from
+its casus belli's localisation, so the game calls it *The Conquest of Majorca*.
+
+**Tilted, not decided.** Five-year modifiers — `hd_crusade_zeal` on the attacker, `hd_beleaguered_realm`
+on the defender — make the record's outcome likely without guaranteeing it; the attacker can still
+lose. A timed modifier is among the cheapest things CK3 has, and lighter than Paradox's own
+`spawn_army`.
+
+**The claim is justification and fallback.** If `start_war` is refused, the claim and the zeal remain
+for the AI to press. The batch looks for a war under the casus belli afterwards and reports
+`war_started` or `claim_only`, so the sidebar says which happened rather than assuming.
+
+**Curated, dated, and keyed on land.** The model picks a war from a table and nothing else. The
+Balearics in that campaign sat under a crown created in play, whose key no file defines, so the war is
+over `d_mallorca` — identical in vanilla and in all three installed mods that touch the islands — and
+the parties are whoever holds `k_aragon` and the top liege over `c_mallorca`. Offered 1224–1239;
+refused if the attacker already holds the land (the Valencia case), is not independent, or is already
+at war with the defender.
+
+**The guard for the card that started it.** A `grant_claim` between the exact parties of a curated war
+that has not yet passed is refused, with a pointer to the war and the year it opens.
+
+**Asked of the running game, not assumed.** A read-only probe on 2026-09-11:
+
+| question | answer |
+|---|---|
+| who holds the Balearics and Aragon | Baldu II holds `c_mallorca`, `c_menorca` and `d_mallorca`, independent; Pero II holds `k_aragon`, independent |
+| a run file naming a title that does not exist | one "Failed to fetch a valid landed title" line; that block is skipped; the rest runs |
+| a run file created after launch | unknown to `run` until CK3 restarts; files that existed at launch run normally |
+
+The second is what made it safe to add title lookups to every snapshot. The third is why this
+project's single fixed `hd.txt` was the right design from the start.
+
+**Not yet watched in a live game.** Eleven cases in `check-tier-fixes.mjs` cover the window, the
+parties, the refusals, the batch and the guard. Whether `start_war` accepts this casus belli from
+script, and whether the war appears under its name, needs a campaign.
+
+
+## 3m. Castile's wars, and a cap on claims, v0.9.0
+
+**The card that made the cap necessary.** The first audit on v0.8.0, in the same live 1217 campaign,
+proposed a `grant_claim` from Castile, with reconquista momentum, on the Mu'minid Empire's own title.
+The model's reasoning was that Castile should take the Almohads' last three holdings in Iberia. What it
+proposed would have done something else entirely: a pressed claim is on the target's primary title,
+so a claim on an emperor is a claim on the empire, and winning it hands over the empire and everything
+under it - Morocco included. It would have made Castile Almohad emperor.
+
+The moment library already refused this: `targetTier: 'kingdom'` on the Almohad moment, with a comment
+naming exactly this outcome. `grant_claim`'s preview named the tier too. Neither stopped it, because the
+model reached past the curated tool for the general one. **Now no claim - from `grant_claim` or from
+`spawn_character`'s optional claim - may be on an empire-tier title**, checked ahead of each action's own
+validation, with an instruction in the prompt beside it.
+
+**Castile's wars.** *The Conquest of Córdoba* (1236, offered 1231-1246) and *The Conquest of Seville*
+(1248, offered 1243-1258), built exactly as Majorca was: a curated entry, a casus belli, two flavour
+events, the claim as justification and fallback, five-year modifiers - `hd_reconquest_resolve`, a
+little milder than the crusade's and paid in prestige rather than piety, and `hd_beleaguered_realm` on
+the defender. Named after the Spanish *Conquista de Córdoba* and *de Sevilla*, to match *the Conquest
+of Majorca*.
+
+**Over the duchies, not the kingdom.** `d_cordoba` and `d_sevilla` both sit de jure under
+`k_andalusia`, and a war over the kingdom would hand Castile all of al-Andalus in one peace - the
+Mu'minid mistake one tier down. The record took Andalusia a city at a time. All four keys are
+identical in vanilla and in the three installed mods that touch Iberian titles.
+
+**Derived, not rewritten.** The two new casus belli are generated from Majorca's by substitution, with
+an assertion that nothing Balearic survives the copy, so the three cannot drift apart mechanically.
+
+**Per-war mod versions.** Majorca needs v0.8.0, Castile's wars v0.9.0. A mod that carries one casus
+belli and not the next would otherwise refuse `start_war` for the missing one and leave a claim,
+silently - the failure the feature gate exists to prevent, one war over. Each entry now carries its
+own `minMod`, and a war the running mod cannot fight is neither offered nor briefed.
+
+Seven more cases in `check-tier-fixes.mjs`: the live card refused verbatim, the same claim refused
+through `spawn_character`, a kingdom claim untouched, Córdoba offered in 1236, the per-war version
+gate, every batch naming only its own war, and the 1217 briefing telling the model both Castilian
+wars are scheduled and when.
+
+
+### Keeping up with a campaign played at speed
+
+The first session on v0.9.0 was played fast, and the thirty-second minimum between clear requests
+could not keep up: **46.8MB went through the logs in the thirty seconds around 1 Jan 1220** - the
+yearly pulse evaluating everything at once - and `error.log`, which has died at 24.8MB and 27.9MB in
+earlier sessions, stood at 24MB when the next clear landed. Logging survived; the tailer read all
+46.8MB. About 1% of it was this mod's; the largest sources were Muslim Enhancements'
+`me_hafidh_scheme.txt` and `me_triggers_override.txt`, and vanilla's wedding events tripped by a mod.
+
+The gap is now three pump ticks, floored at eight seconds (`clearGapMs`). It has to outlast the run
+file's retirement of the previous request, two ticks after staging, or a new request could be wiped
+before the pump reads it; a test checks that for every allowed pump interval.
+
+
+## 3n. Watched working: a historical war, started live, v0.10.0
+
+**The Conquest of Majorca began in a live 1219 campaign.** Staged by the exact batch the Director
+builds on approval (`hd_wartest.txt`, generated from `warScript`), in the same second:
+
+```
+run hd_wartest.txt
+event_fired hd_event.0230      Aragon: "The Conquest of Majorca"
+event_fired hd_event.0231      Mallorca: "Sails off the Island"
+applied/;/999001/;/historical_war/;/war_started
+```
+
+The game's own war window called it **"The Conquest of Majorca"**, fought over the "Archonate of
+Mallorca" - which is what the installed mods call `d_mallorca` under Sardinian naming, so the war went
+over the land's own title rather than the crown its holder created in play. Zero errors from the batch
+or the casus belli. `start_war` accepts a script-only casus belli from a run file, and the batch's own
+check - a war under that casus belli exists afterwards - is what reported it.
+
+**What the war window showed that the tests could not.** The stakes are heavy for a two-county duchy:
+a lost war costs the attacker 2,500 gold in reparations and a thousand in fame, because the casus belli
+pays fame on vanilla's fixed `major_prestige_value` rather than on the claim war's own size-scaled
+factor. Worth scaling down.
+
+**Vanilla can race the record.** In the same campaign, played on without the test, Aragon took Mallorca
+in 1220 - nine years early - under Fate of Iberia's *Iberian Reclamation*, the expel-interloper casus
+belli, because the islands' king was Sardinian. It needed neither the Director's claim nor its momentum,
+both of which had been revoked. The historical war then correctly read as already fought. Holding a war
+to its date against vanilla's own mechanisms would need a restraining tool; that is a design question,
+not a bug.
+
+**Beyond Iberia: the Albigensian Crusade.** France against whoever holds Toulouse, over `d_toulouse`,
+dated to Louis VIII's royal crusade of 1226 and offered 1221-1236. The first curated war outside the
+peninsula, added to show the machinery was never Iberian: no code changed to add it, only a table
+entry, a casus belli derived from Majorca's, two events and their localisation. `k_france`,
+`d_toulouse` and `c_toulouse` are identical in vanilla and in both installed mods that define them.
+
+**Also seen live, and queued rather than fixed.** The four log-clear slots evaluate their scripted GUI
+with `GetPlayer` as root, and while a save is loading there is briefly no player, so each slot logs one
+"Scoped object of type 'character' is not valid" per load. Harmless - the slots work before and after -
+but it is the Director's own error, and `GetPlayer.IsValid` is the guard vanilla uses 47 times.
+
 ## 3e. Branch state, as of 8 September 2026
 
 | Branch | Contains | Pushed | Merged |

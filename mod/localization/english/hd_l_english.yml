@@ -65,3 +65,77 @@
  hd_event.0211.t:0 "The Cracks Run Deep"
  hd_event.0211.desc:0 "Word comes from the south faster than it can be checked, and all of it says the same thing. Garrisons unpaid, governors ruling in their own names, tax that leaves a province and never arrives. Whatever held that power together is not holding it any more.\n\nWhat is coming apart down there will be divided by whoever is standing closest when it finishes. We are standing close."
  hd_event.0211.a:0 "Then we had better be ready."
+
+ hd_almohad_fraying:0 "The Writ Runs Thin"
+ hd_almohad_breaking:0 "A Caliphate Coming Apart"
+ hd_almohad_shattered:0 "The Taifas Return"
+ hd_taifa_ascendant:0 "The South Is Open"
+ hd_taifa_risen:0 "A Country of One's Own"
+ hd_caliphal_authority_broken:0 "The Caliph Could Not Hold It"
+
+ hd_event.0220.t:0 "The Provinces Answer Slowly"
+ hd_event.0220.desc:0 "The letters still arrive, and they are still addressed correctly. It is the contents that have changed. A governor regrets that the levy cannot be spared this season. Another has already spent the tax on a wall he did not ask permission to build. A third writes at length, and beautifully, and agrees to nothing.\n\nNone of them has rebelled. Not one has said the word. But the orders that go south now come back as correspondence, and a state in which orders are negotiated is not the same state it was."
+ hd_event.0220.a:0 "Then we will find out who is still ours."
+
+ hd_event.0221.t:0 "What Falls Southward"
+ hd_event.0221.desc:0 "The reports have stopped disagreeing, which is how we know they are true. The power across the frontier is not losing to anyone; it is being put down, province by province, by the men who were holding it on its behalf.\n\nThere is no army to beat, which is the difficulty. There will shortly be a dozen of them, each too small to matter and too proud to combine. Whoever is ready when that happens will spend a generation deciding what the map looks like. Whoever is not will be told."
+ hd_event.0221.a:0 "Then let us be ready when it falls."
+ hd_event.0221.b:0 "Their collapse is not our business."
+
+ hd_event.0222.t:0 "In His Own Name"
+ hd_event.0222.desc:0 "It was not decided in a single evening. The tax went unsent, and nothing came of it. The garrison was paid out of the province's own purse, and nothing came of that either. The prayer was read, one Friday, without the name that had always been in it, and the congregation noticed and said nothing.\n\nWhat is left is a formality, and formalities are cheap. The province has a ruler. It has had one for some time. All that remains is to stop pretending otherwise."
+ hd_event.0222.a:0 "Let it be said aloud, then."
+
+ hd_conquest_of_majorca_war_name:0 "The [ConcatIfNeitherEmpty('$ORDER|q$', ' ')]Conquest of Majorca"
+ hd_conquest_of_majorca_war_name_my:0 "The [ConcatIfNeitherEmpty('$ORDER|q$', ' ')]Conquest of Majorca"
+ hd_conquest_of_majorca_war_name_base:0 "Conquest of Majorca"
+ hd_conquest_of_majorca_cb_name:0 "Crusade for Majorca"
+ hd_crusade_zeal:0 "Crusading Zeal"
+ hd_beleaguered_realm:0 "Beleaguered and Unsupported"
+
+ hd_event.0230.t:0 "The Conquest of Majorca"
+ hd_event.0230.desc:0 "The fleet is larger than anyone at court believed the crown could pay for, and the Church has paid for as much of it as the treasury has. The bishops preached the crossing as a crusade, and the barons took the cross in numbers that surprised even the bishops.\n\nThe island has been a raiders' harbour and a rival's toll-gate for as long as anyone can remember. From tomorrow it is only a question of whether its walls are as good as its reputation."
+ hd_event.0230.a:0 "Set sail."
+
+ hd_event.0231.t:0 "Sails off the Island"
+ hd_event.0231.desc:0 "The watchmen on the headlands count the sails and send the number down to the harbour twice, because the first count was not believed. It is not a raid. Raiders do not bring horses, and raiders do not bring bishops.\n\nWhatever help was promised from across the water will not come in time. The island will be held by those already on it, or it will not be held at all."
+ hd_event.0231.a:0 "Man the walls."
+
+ hd_conquest_of_cordoba_war_name:0 "The [ConcatIfNeitherEmpty('$ORDER|q$', ' ')]Conquest of Córdoba"
+ hd_conquest_of_cordoba_war_name_my:0 "The [ConcatIfNeitherEmpty('$ORDER|q$', ' ')]Conquest of Córdoba"
+ hd_conquest_of_cordoba_war_name_base:0 "Conquest of Córdoba"
+ hd_conquest_of_cordoba_cb_name:0 "Reconquest of Córdoba"
+ hd_conquest_of_seville_war_name:0 "The [ConcatIfNeitherEmpty('$ORDER|q$', ' ')]Conquest of Seville"
+ hd_conquest_of_seville_war_name_my:0 "The [ConcatIfNeitherEmpty('$ORDER|q$', ' ')]Conquest of Seville"
+ hd_conquest_of_seville_war_name_base:0 "Conquest of Seville"
+ hd_conquest_of_seville_cb_name:0 "Reconquest of Seville"
+ hd_reconquest_resolve:0 "Resolve of the Reconquest"
+
+ hd_event.0232.t:0 "The Gate of the Axarquía"
+ hd_event.0232.desc:0 "It began without the king. A band of frontier knights, told that the walls of the eastern suburb were badly kept, went over them in the dark and woke holding a quarter of the old caliphs' city with nobody's leave. They sent word north, and the crown has come south to finish what they started.\n\nCórdoba was the capital of al-Andalus for three centuries, and its great mosque is larger than any church in Christendom. Whether it falls now depends on whether the men inside still believe anyone is coming to relieve them."
+ hd_event.0232.a:0 "Then see to it that no one comes."
+
+ hd_event.0233.t:0 "The Axarquía Has Fallen"
+ hd_event.0233.desc:0 "The eastern suburb was lost in a single night, to men who had no army behind them and no orders to be there. By the time the court understood what had happened, the army had arrived.\n\nThe city has its walls, its water and the memory of having been the greatest in the West. What it does not have is anyone marching to its aid."
+ hd_event.0233.a:0 "Then Córdoba will stand alone."
+
+ hd_event.0234.t:0 "The Bridge of Boats"
+ hd_event.0234.desc:0 "Seville cannot be starved while the bridge of boats to Triana stands. Every night the barges bring in grain, and every morning the walls are manned by men who have eaten. So a fleet has been built on the northern coast and brought round into the river, and the plan fits in a sentence: wait for a strong tide and a following wind, and break the chain.\n\nIt has never been done. That is the best argument for trying."
+ hd_event.0234.a:0 "Break the chain."
+
+ hd_event.0235.t:0 "Ships in the River"
+ hd_event.0235.desc:0 "There are Christian ships in the Guadalquivir, which was not supposed to be possible, and they ride at anchor within sight of the bridge of boats - the only reason the city still eats.\n\nThe garrison is brave and the walls are very good. Neither will matter if the bridge goes."
+ hd_event.0235.a:0 "Guard the bridge."
+
+ hd_albigensian_crusade_war_name:0 "The [ConcatIfNeitherEmpty('$ORDER|q$', ' ')]Albigensian Crusade"
+ hd_albigensian_crusade_war_name_my:0 "The [ConcatIfNeitherEmpty('$ORDER|q$', ' ')]Albigensian Crusade"
+ hd_albigensian_crusade_war_name_base:0 "Albigensian Crusade"
+ hd_albigensian_crusade_cb_name:0 "Crusade against the Albigensians"
+
+ hd_event.0236.t:0 "The Royal Crusade"
+ hd_event.0236.desc:0 "For seventeen years the crusade in the south has belonged to barons and legates, and for seventeen years it has won battles and lost the country. Now the crown has taken the cross itself. The army gathering in the north is the king's, paid for by a tenth of the Church's own revenues, and it goes south not merely to punish heretics but to settle, once, who rules Toulouse.\n\nThe towns of the Midi have seen crusaders before. They have not seen a king."
+ hd_event.0236.a:0 "Then let them see one."
+
+ hd_event.0237.t:0 "The King Comes South"
+ hd_event.0237.desc:0 "The crusaders of Montfort's day came and went, and Toulouse outlasted them; the city even killed Montfort himself, with a stone from a mangonel its own women were working. But this is no baron's army. The crown of France is marching, and the towns along its road are opening their gates before it arrives.\n\nToulouse has survived every crusade so far by waiting for the crusaders to go home. A king does not go home."
+ hd_event.0237.a:0 "Then Toulouse will wait behind its walls."

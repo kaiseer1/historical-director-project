@@ -205,3 +205,49 @@ export function macroSupport(ck3UserFolder) {
     'its modifiers, its event chain and the union decision',
   );
 }
+
+/**
+ * The mod version that first carried the Almohad collapse: the five
+ * hd_almohad_* / hd_taifa_* modifiers, the hd_caliphal_authority_broken opinion
+ * modifier and the hd_event.0220-0222 chain.
+ *
+ * A fifth threshold rather than a bump of an existing one, for the reason
+ * MOMENT_MIN_MOD gives: the features are independent, and collapsing them would
+ * refuse a working feature to protect a different one. A 0.6.0 mod runs Iberian
+ * pressure and the moment library perfectly well and has no collapse content at
+ * all.
+ */
+export const COLLAPSE_MIN_MOD = '0.7.0';
+
+/** @param {string} ck3UserFolder */
+export function collapseSupport(ck3UserFolder) {
+  return featureSupport(
+    ck3UserFolder,
+    COLLAPSE_MIN_MOD,
+    'the Almohad collapse',
+    'its modifiers, its opinion modifier and its event chain',
+  );
+}
+
+/**
+ * The mod version that first carried the historical war library: the
+ * hd_conquest_of_majorca_cb casus belli, the hd_crusade_zeal and
+ * hd_beleaguered_realm modifiers, and hd_event.0230-0231.
+ *
+ * Gated for the quietest failure of any feature here. A mod without the casus
+ * belli would not fail loudly: start_war would be refused, the claim and the
+ * modifiers would still land, and the batch would honestly report claim_only -
+ * so the player would approve a war and receive a claim, every time, with
+ * nothing to say why.
+ */
+export const WAR_MIN_MOD = '0.8.0';
+
+/** @param {string} ck3UserFolder */
+export function warSupport(ck3UserFolder) {
+  return featureSupport(
+    ck3UserFolder,
+    WAR_MIN_MOD,
+    'historical wars',
+    'the casus belli, modifiers and events they use',
+  );
+}

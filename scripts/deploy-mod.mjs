@@ -10,7 +10,7 @@ import { loadConfig } from '../src/config.js';
 import { deployMod } from '../src/setup/deployMod.js';
 
 const cfg = loadConfig();
-const result = deployMod(cfg.ck3UserFolder);
+const result = deployMod(cfg.ck3UserFolder, { pumpIntervalSeconds: cfg.director.pumpIntervalSeconds });
 
 if (!result.ok) {
   console.error(result.error);
@@ -18,6 +18,7 @@ if (!result.ok) {
 }
 
 console.log(`Deployed ${result.files} files to ${result.dest}`);
+console.log(`Execution pump interval: ${result.pumpIntervalSeconds}s`);
 console.log(`Wrote descriptor ${result.descriptorPath}`);
 console.log('');
 console.log('Next: enable "Historical Director" in the CK3 launcher playset,');

@@ -49,11 +49,14 @@ This is **v0.4.2** — a testing alpha. A complete vertical slice, not a finishe
 | Perception | Regional world-state snapshots: rulers, titles, tiers, footprint, culture, faith, government |
 | Sphere of influence | Seeded from where the player rules — capital *and* realm footprint — then grown as far outward as you set it |
 | Knowledge layer | Wikipedia lead extracts, era-filtered + Wikidata reign intervals and dynasty spans |
-| Toolkit | `spawn_character` (optionally born into a named house and carrying a pressed claim), `set_relations`, `grant_claim`, `adjust_title_tier`, `trigger_event`, `iberian_pressure` |
+| Toolkit | `spawn_character` (optionally born into a named house and carrying a pressed claim), `set_relations`, `grant_claim`, `adjust_title_tier`, `trigger_event`, `iberian_pressure`, `almohad_collapse`, `historical_war` |
 | Macro events | `iberian_pressure` (`hd_event.0200`) — one approval sets a regional process running across a unifier and up to four partners. Intensity is checked against a band computed from the live map, so a crusade in a world that will not support one is refused rather than obeyed. Transfers no title, starts no war |
+| Macro events, the other direction | `almohad_collapse` (`hd_event.0220`–`0222`) — a power in Iberia coming apart from the inside after Las Navas rather than being beaten in the field. The collapsing ruler loses revenue, levies and the regard of their own vassals; some of those vassals raise independence factions at once, at odds the preview states in words. Severity is bounded by how little Andalusian ground is left, so an intact caliphate is refused rather than dismantled to fit the request. Transfers no title, starts no war |
+| Historical wars | `historical_war` (`hd_conquest_of_majorca_cb`, `hd_event.0230`–`0231`) — the one action that starts a war. A curated war the record names, near its date, under its own casus belli and historical name: *The Conquest of Majorca* (1229), Castile's *Conquest of Córdoba* (1236) and *Conquest of Seville* (1248), and beyond Iberia *the Albigensian Crusade* (1226). Watched working in a live game: the Conquest of Majorca started under its own name, with no errors. CK3 fights it; five-year modifiers tilt it without deciding it; a pressed claim is its justification and its fallback. Refused outside its window, when the land is already the attacker's, or when the attacker is not free to declare |
 | Narrative cards | Every proposal carries in-world prose written from the lore and the live campaign together. The prose is a sibling of the action, never a parameter to it: a narrative offered as an action argument is rejected as an unexpected parameter, so nothing free-text can reach the composed script |
 | Momentum | `grant_claim` can also supply the means to press a claim — money, the resource the war costs, and a timed appetite for it. Three pre-authored patterns (`reconquista`, `holy_war`, `succession_pressure`), each a fixed set of effects reached by lookup rather than composed by the model. It never starts the war |
 | Destructive cap | At most one `adjust_title_tier` per audit, enforced in the Director rather than requested in the prompt. A second demotion in the same audit is rejected and reported, so a bad audit cannot dissolve two realms at once |
+| Claim cap | No claim - from `grant_claim` or `spawn_character` - on an empire-tier title. A pressed claim is on the target's primary title, so a claim on an emperor is a claim on the whole empire, and winning it hands over everything under it. Found live: a 1217 card aimed Castile at the Mu'minid Empire's own title to take its last three Iberian holdings, which would have made Castile Almohad emperor, Morocco included |
 | Governance | Encyclopedic sidebar, auto-pause, Approve / Decline, every verdict logged |
 | Settings | Audit cadence, sphere reach and ceiling, and the model — all changed from the sidebar, no restart |
 | Lore Book | Persistent ledger of approvals *and* declines, re-injected into later audits |
@@ -114,6 +117,17 @@ watches only the ground you hold, 2 your neighbourhood, 4 most of the Old World 
 whole supported map. **Sphere ceiling** caps the total, and is the real limit on cost. **Realms in
 prompt** is how many the Director is shown; your own neighbours come first, so raising it adds distant
 realms rather than nearer ones.
+
+*How fast the bridge ticks.* **`pumpIntervalSeconds`** in `config.json` sets how often the mod's
+execution pump re-runs the staged file. It is the only setting that lives in the mod rather than the
+orchestrator — it is a `duration` inside a GUI state, and nothing can read a global variable from one
+— so it is written into `hd_runner.gui` at deploy time and needs `npm run deploy:mod` and a CK3
+restart rather than taking effect on the next audit. Two seconds is responsive. Raising it is a real
+lever on log volume rather than a micro-optimisation: every `run` makes CK3 re-validate its whole
+script database and re-report every unset variable in every loaded mod, measured at 315 `error.log`
+lines per tick on a heavy modlist. Ten seconds cuts that by 80%, and costs up to ten seconds between
+approving an action and it reaching the game — cheap, when the Director's own cadence is measured in
+in-game years. The acknowledgment timeouts scale off it automatically.
 
 *What it reasons with.* Provider and model, with presets for DeepSeek, a local Ollama, and any other
 OpenAI-compatible endpoint. A key pasted there is held in memory for that session only and is never

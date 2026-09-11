@@ -3,3 +3,18 @@
 hd_historical_opinion = {
 	opinion = 0
 }
+
+# The caliph's authority visibly gone, from the point of view of the men who
+# were obeying it. Applied by hd_event.0220 from each vassal toward the
+# collapsing ruler, on top of the vassal_opinion penalty the character modifier
+# carries: the modifier is the standing condition, this is the moment they
+# noticed. Both feed vanilla's independence faction score, which reads liege
+# opinion at -0.4 per point.
+#
+# Timed and decaying, because this is a shock rather than a permanent grievance
+# and a caliphate that somehow recovers should not be punished for it for ever.
+hd_caliphal_authority_broken = {
+	opinion = -30
+	years = 25
+	decaying = yes
+}

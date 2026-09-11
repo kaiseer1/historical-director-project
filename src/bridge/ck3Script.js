@@ -117,7 +117,7 @@ export function locateScript(regions, footprintRegions = []) {
  * @param {string[]} [homeRegions] where the player's own realm holds land
  * @param {string[]} [nearRegions] the neighbourhood; home is added to it
  */
-export function snapshotScript(regions, token, homeRegions = [], nearRegions = []) {
+export function snapshotScript(regions, token, homeRegions = [], nearRegions = [], titles = []) {
   const home = new Set(homeRegions);
   const near = new Set([...homeRegions, ...nearRegions]);
 
@@ -223,6 +223,36 @@ export function snapshotScript(regions, token, homeRegions = [], nearRegions = [
   // assumption that produced a campaign reporting itself as being nowhere,
   // and the cost of being wrong here is a log full of script errors rather
   // than a quiet miss.
+  // The titles the historical war library is fought over, looked up by key.
+  // Global rather than per region, and few: an entry names an attacker's
+  // title, a target title and one anchor county, and nothing else is asked
+  // about. Keys come from that table and are filtered to the shape a CK3 title
+  // key has anyway, so nothing composed can reach the file this way.
+  //
+  // Safe on a campaign whose mods lack one of them. Checked in a live game on
+  // 2026-09-11: a run file naming a title that does not exist logs one
+  // "Failed to fetch a valid landed title" line and skips that block, and
+  // every line after it still runs. The scope shape below is the one that same
+  // probe used to read the Balearics and Aragon correctly.
+  const titleLookups = titles
+    .filter((t) => /^[a-z]_[a-z0-9_]+$/.test(t))
+    .flatMap((t) => [
+      `title:${t} = {`,
+      '\tif = {',
+      '\t\tlimit = { exists = holder }',
+      '\t\tholder = {',
+      `\t\t\tdebug_log = "HD:/;/title_holder/;/${t}/;/[THIS.Char.GetID]"`,
+      '\t\t\ttop_liege = {',
+      `\t\t\t\tdebug_log = "HD:/;/title_top/;/${t}/;/[THIS.Char.GetID]"`,
+      '\t\t\t}',
+      '\t\t}',
+      '\t}',
+      '\telse = {',
+      `\t\tdebug_log = "HD:/;/title_holder/;/${t}/;/none"`,
+      '\t}',
+      '}',
+    ]);
+
   const TIERS = ['empire', 'kingdom', 'duchy', 'county', 'barony'];
   const tierEmit = TIERS.flatMap((t) => [
     '\tif = {',
@@ -283,6 +313,7 @@ export function snapshotScript(regions, token, homeRegions = [], nearRegions = [
     '\tremove_variable = hd_counties',
     '\tchange_global_variable = { name = hd_idx add = 1 }',
     '}',
+    ...titleLookups,
     `debug_log = "HD:/;/snapshot_end/;/${token}"`,
   ];
 }

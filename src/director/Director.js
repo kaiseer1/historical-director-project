@@ -3,6 +3,7 @@ import { toolSchemas, validateProposal } from './toolkit.js';
 import { label, labelList } from './regions.js';
 import { bookmarkBriefing } from './bookmarkTiers.js';
 import { momentBriefing } from './moments.js';
+import { warBriefing } from './historicalWars.js';
 import * as wikipedia from '../knowledge/wikipedia.js';
 import * as wikidata from '../knowledge/wikidata.js';
 
@@ -357,6 +358,14 @@ export class Director {
       'historical_moment carries a turning point the record actually names, with its own framing, an event the ruler sees, and effects tuned to that moment. grant_claim is the general tool, for a claim the record supports that is not one of the curated moments. Where the briefing below names a moment matching what you intend, propose the moment.',
       'Destroying an empire- or kingdom-tier primary title releases the vassals below it and can fragment a region in a single stroke. Treat it as a major intervention: propose it only at high confidence, and state that consequence plainly in the consequences field.',
       '',
+      'SOME HISTORY IS AN EVENT, NOT A PRESSURE.',
+      'historical_war starts a war the record names - the Conquest of Majorca, 1229 - under its own casus belli and its historical name, and it is the only action that starts a war. It is offered only near its date and only while its target is not already taken, and the briefing below says which wars are on the record now and which are scheduled later. Where a curated war fits, propose it rather than a grant_claim between the same two realms. Where one is scheduled later, do not pre-empt it with a claim now: a claim is a licence the AI may use a decade early, and the record gives a date. Say plainly in the consequences field that approving it starts a war.',
+      'A claim on an empire-tier title is refused. It is a claim on the whole empire: winning it hands over everything the emperor holds, not the land you meant. Name the ruler who holds that land directly, or propose the curated war.',
+      '',
+      'THE TWO IBERIAN MACRO ACTIONS DESCRIBE OPPOSITE PROCESSES.',
+      'iberian_pressure is a peninsula gathering around a unifier, and is supported by how much ground the Andalusian realms still hold. almohad_collapse is a Muslim power in Iberia coming apart from the inside after Las Navas de Tolosa, and is supported by how little. They are not intensities of one thing, and a 13th-century peninsula can carry both at once - Castile consolidating while the Almohads disintegrate is the historical case, not a contradiction. Each is refused outright when the live map will not support it, so propose the one the map is actually showing you.',
+      'almohad_collapse is the only action that moves rulers who did not choose to move: some vassals of the collapsing ruler raise independence factions at once. Say so plainly in the consequences field. It still transfers no titles and starts no wars.',
+      '',
       'PREFER BUILDING OVER BREAKING.',
       'The toolkit can add to the world as well as subtract from it. A macro event sets a historical process in motion and lets the rulers inside it decide; an endowed spawn_character puts a claimant of the right house in a court that can press for them; grant_claim gives a ruler a reason to act. Reach for those first.',
       'adjust_title_tier is the last resort, for drift that nothing constructive can address - not the default way of saying "this realm is wrong". At most one demotion is accepted per audit regardless, so spending the audit on one is a choice about what you are not proposing.',
@@ -404,6 +413,7 @@ export class Director {
 
     const briefing = bookmarkBriefing(snapshot.year, this.baseline?.capturedYear ?? 0);
     const moments = momentBriefing(snapshot, snapshot.year);
+    const wars = warBriefing(snapshot, snapshot.year);
 
     const user = [
       `Date in game: ${snapshot.date} (year ${snapshot.year})`,
@@ -416,6 +426,7 @@ export class Director {
       '',
       ...(briefing ? ['## The record at the nearest bookmark', briefing, ''] : []),
       ...(moments ? ['## Curated moments that fit this date', moments, ''] : []),
+      ...(wars ? ['## Historical wars on the record', wars, ''] : []),
       ...warSection(snapshot),
       ...vanishedSection(snapshot, this.baseline),
       '## Retrieved historical evidence',

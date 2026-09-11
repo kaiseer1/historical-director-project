@@ -254,7 +254,7 @@ function renderWorld() {
   // have to think about it.
   if (s.log && !s.log.supported) {
     host.appendChild(el('div', 'warn',
-      'The deployed companion mod cannot clear the game log. CK3 stops logging after about 17MB in a session, '
+      'The deployed companion mod cannot clear the game log. CK3 can stop logging after as little as 17MB in a session, '
       + 'and after that the Director goes blind until you restart the game. Redeploy the mod to fix this.'));
   } else if (s.log && s.log.mbSinceClear > s.log.thresholdMB / 2) {
     host.appendChild(el('div', 'note',
