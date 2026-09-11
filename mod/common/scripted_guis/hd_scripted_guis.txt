@@ -1,0 +1,55 @@
+﻿# Historical Director - the bridge from script state to a GUI condition.
+#
+# There is exactly one reason this file exists. `log.clearAll` is a console
+# command, and nothing in effect script can run one: there is no such effect
+# anywhere in the game files, and the run file the orchestrator stages contains
+# effects. Only a GUI widget can reach the console.
+#
+# So the orchestrator cannot clear the log. It can only ask - by setting a
+# global variable - and something GUI-side has to be able to see that it did.
+# `HasGlobalVariable` and `GetGlobalVariable` do not exist as GUI functions;
+# they appear nowhere in the game's own gui/ files. A scripted GUI is the
+# attested bridge: its `is_shown` is a script trigger, and GUI reads it through
+# `GetScriptedGui('name').IsShown(...)`, which vanilla uses for exactly this
+# kind of question.
+#
+# `effect` is the return path. The widget calls `.Execute(...)` to retire the
+# slot it just serviced, so a request is consumed rather than standing until
+# the orchestrator happens to clear it.
+#
+# Why the log needs clearing at all: CK3's log subsystem has a per-session
+# cumulative write limit of roughly 17MB, after which debug.log and error.log
+# both stop writing until the game restarts. Truncating the file from outside
+# does not help - the engine counts what it has written, not what is on disk.
+# `log.clearAll` resets the engine's own counter and is the only thing that
+# does. Measured under controlled experiment by the VOTC project; see issue #1
+# on this repository.
+#
+# Four slots rather than one. A GUI state fires when its trigger goes from
+# false to true, and rotating means each consecutive request is a genuine edge
+# on a different state rather than a re-arm of the same one, which is the shape
+# VOTC validated in a live game rather than the shape that ought to work.
+
+hd_log_clear_a = {
+	scope = character
+	is_shown = { has_global_variable = hd_log_clear_a }
+	effect = { remove_global_variable = hd_log_clear_a }
+}
+
+hd_log_clear_b = {
+	scope = character
+	is_shown = { has_global_variable = hd_log_clear_b }
+	effect = { remove_global_variable = hd_log_clear_b }
+}
+
+hd_log_clear_c = {
+	scope = character
+	is_shown = { has_global_variable = hd_log_clear_c }
+	effect = { remove_global_variable = hd_log_clear_c }
+}
+
+hd_log_clear_d = {
+	scope = character
+	is_shown = { has_global_variable = hd_log_clear_d }
+	effect = { remove_global_variable = hd_log_clear_d }
+}

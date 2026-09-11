@@ -14,6 +14,33 @@ import path from 'node:path';
 /** Tells the mod's watchdog the pump is still executing this file. */
 const HD_ALIVE = 'hd_mark_alive = yes';
 
+/**
+ * CK3 wants its script files with a byte-order mark, and says so.
+ *
+ * Without it every single `run hd.txt` writes this to error.log:
+ *
+ *   [E][lexer.cpp:306]: File 'run/hd.txt' should be in utf8-bom encoding
+ *   (will try to use it anyways)
+ *
+ * "Anyways" is doing a lot of work there. Watched live on 2026-09-08: 13 pump
+ * ticks, 13 warnings, one-to-one, and each one immediately followed by CK3
+ * re-validating its whole script database and dumping several thousand
+ * "Variable X is used but is never set" lines across every loaded mod. At a
+ * two-second cadence that reached **9,900 lines per second** into debug.log and
+ * error.log together, and drove the log budget through three clears in three
+ * minutes. The Director's own snapshots were not the dominant log cost by two
+ * orders of magnitude; this was.
+ *
+ * Whether the BOM stops the revalidation or only the warning is an empirical
+ * question and the answer is in the next session's line counts. It costs three
+ * bytes either way.
+ *
+ * VOTC specifies "UTF-8 BOM, single write" for its own run file in issue #1
+ * §2.2. That reads like a detail until you have watched this happen, at which
+ * point it reads like something they paid for too.
+ */
+const BOM = '﻿';
+
 export class RunFileManager {
   /** @param {string} ck3UserFolder */
   constructor(ck3UserFolder) {
@@ -57,7 +84,7 @@ export class RunFileManager {
       `}`,
       '',
     ].join('\n');
-    fs.writeFileSync(this.filePath, script, 'utf8');
+    fs.writeFileSync(this.filePath, BOM + script, 'utf8');
     return script;
   }
 
@@ -68,7 +95,7 @@ export class RunFileManager {
    */
   clear() {
     try {
-      fs.writeFileSync(this.filePath, `${HD_ALIVE}\n`, 'utf8');
+      fs.writeFileSync(this.filePath, `${BOM}${HD_ALIVE}\n`, 'utf8');
     } catch { /* the game may hold it briefly; the next clear will catch it */ }
   }
 }

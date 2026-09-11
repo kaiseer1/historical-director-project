@@ -1,6 +1,6 @@
 {
   "name": "historical-director",
-  "version": "0.5.0",
+  "version": "0.10.0",
   "description": "A human-in-the-loop LLM framework for historically-grounded gameplay in Crusader Kings III",
   "type": "module",
   "main": "src/main.js",
@@ -10,7 +10,7 @@
     "doctor": "node scripts/doctor.mjs",
     "build:exe": "node scripts/build-exe.mjs",
     "bundle": "node scripts/bundle.mjs",
-    "check": "node scripts/check-tier-fixes.mjs && node scripts/check-regions.mjs && node scripts/check-localization.mjs",
+    "check": "node scripts/check-tier-fixes.mjs && node scripts/check-regions.mjs && node scripts/check-localization.mjs && node scripts/check-resilience.mjs",
     "smoke": "node scripts/smoke.mjs --andalus",
     "smoke:exe": "node scripts/smoke.mjs --andalus --exe",
     "smoke:momentum": "node scripts/smoke.mjs --andalus --momentum",

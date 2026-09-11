@@ -26,6 +26,8 @@ import { snapshotScript } from '../src/bridge/ck3Script.js';
 import { preflight } from '../src/setup/preflight.js';
 import { LoreBook } from '../src/lore/LoreBook.js';
 import { INTENSITY, INTENSITY_KEYS, intensityBand, hasRegionData } from '../src/director/macroEvents.js';
+import { SEVERITY, SEVERITY_KEYS, collapseBand, COLLAPSE_YEAR, setCollapseSupport } from '../src/director/almohadCollapse.js';
+import { WARS, setWarSupport, warTitles, warScript, warBriefing } from '../src/director/historicalWars.js';
 
 let passed = 0;
 let failed = 0;
@@ -235,13 +237,16 @@ console.log('\nHistorical Director — tier-demotion fixes\n');
   const snap = snapshot({
     realms: [
       { id: 20, ruler: 'Robert', title: 'Duchy of Apulia', rank: 'Duchy', tierKey: 'duchy' },
-      { id: 21, ruler: 'Henry IV', title: 'Holy Roman Empire', rank: 'Empire', tierKey: 'empire' },
+      // A kingdom since v0.9.0: a claim on an empire-tier title is now refused
+      // outright by the tier cap (HW12), so the disclosure this case was written
+      // for is exercised one tier down, where it still applies.
+      { id: 21, ruler: 'Henry IV', title: 'Kingdom of Germany', rank: 'Kingdom', tierKey: 'kingdom' },
     ],
   });
   const r = validateProposal({ action: 'grant_claim', args: { actor: 20, target: 21 } }, snap, risenBaseline);
   check(
     '9. grant_claim preview names the claimed title tier',
-    r.ok && /empire-tier title Holy Roman Empire/.test(r.preview),
+    r.ok && /kingdom-tier title Kingdom of Germany/.test(r.preview),
     r.ok ? r.preview : r.error,
   );
 }
@@ -365,7 +370,7 @@ const FRANCE = { id: 1, ruler: 'Philippe', title: 'Kingdom of France', rank: 'Ki
 }
 
 {
-  // The case from PROGRESS.md section 3, end to end.
+  // The case from the v0.2 live campaign, end to end.
   const realm = { id: 9, ruler: 'Zahir III', title: 'the banu zahir Empire', rank: 'Empire', tierKey: 'empire', counties: 65 };
   const b = baselineAt(1218, realm);
   const now = snapshot({ token: '9', date: '1222.1.1', totalDays: 446000, realms: [realm] });
@@ -1119,6 +1124,9 @@ function bohemia() {
   // A claim is an act against the title's holder, so it takes grant_claim's
   // locality rule. A bare spawn does not.
   const snap = bohemia();
+  // The Horde stands in at kingdom tier so that locality, not the v0.9.0 tier
+  // cap, is what this case exercises; the cap has its own cases (HW12, HW13).
+  snap.realmsById.get(32).tierKey = 'kingdom';
   const rim = validateProposal(
     { action: 'spawn_character', args: { name: 'Ottokar', sex: 'male', age: 30, host: 32, claim: 32 } },
     snap, risenBaseline,
@@ -1752,6 +1760,47 @@ const moment = (args, st) => validateProposal({ action: 'historical_moment', arg
     'H9. every offered moment names mod content that exists',
     missing.length === 0,
     missing.length ? missing.join('; ') : MOMENT_KEYS.length + ' moments, all their events and modifiers defined',
+  );
+}
+
+{
+  // The same guard for the collapse, which names more mod content than any
+  // other action in the toolkit: five character modifiers, one opinion
+  // modifier and three events. Any one of them missing fails the way a missing
+  // modifier always does - a line in error.log and nothing in the game, while
+  // the applied record still says ok.
+  const modFile = fs.readFileSync(path.join(ROOT_DIR, 'mod', 'common', 'modifiers', 'hd_modifiers.txt'), 'utf8');
+  const opinionFile = fs.readFileSync(path.join(ROOT_DIR, 'mod', 'common', 'opinion_modifiers', 'hd_opinion_modifiers.txt'), 'utf8');
+  const eventFile = fs.readFileSync(path.join(ROOT_DIR, 'mod', 'events', 'hd_events.txt'), 'utf8');
+  const missing = [];
+  for (const key of SEVERITY_KEYS) {
+    if (!modFile.includes(SEVERITY[key].modifier + ' = {')) missing.push(key + ': ' + SEVERITY[key].modifier);
+  }
+  for (const m of ['hd_taifa_ascendant', 'hd_taifa_risen']) {
+    if (!modFile.includes(m + ' = {')) missing.push('modifier ' + m);
+  }
+  if (!opinionFile.includes('hd_caliphal_authority_broken = {')) missing.push('opinion modifier hd_caliphal_authority_broken');
+  for (const e of ['hd_event.0220', 'hd_event.0221', 'hd_event.0222']) {
+    if (!eventFile.includes(e + ' = {')) missing.push('event ' + e);
+  }
+  check(
+    'AC12. the collapse names mod content that exists, all of it',
+    missing.length === 0,
+    missing.length ? missing.join('; ') : '3 severities, 5 modifiers, 1 opinion modifier and 3 events defined',
+  );
+}
+
+{
+  // The defection chance is stated twice - once as a number the event rolls,
+  // once as a phrase the player reads - and they are in different files. This
+  // is the check that keeps a tuning change in one from quietly making the
+  // other a lie, which is the failure the sidebar can least afford.
+  const eventFile = fs.readFileSync(path.join(ROOT_DIR, 'mod', 'events', 'hd_events.txt'), 'utf8');
+  const wrong = SEVERITY_KEYS.filter((k) => !new RegExp('chance = ' + SEVERITY[k].defection + '\\b').test(eventFile));
+  check(
+    'AC13. every severity rolls in the event at the chance its preview promises',
+    wrong.length === 0,
+    wrong.length ? 'not found in the event: ' + wrong.join(', ') : SEVERITY_KEYS.map((k) => k + ' ' + SEVERITY[k].defection + '%').join(', '),
   );
 }
 
@@ -2481,6 +2530,524 @@ function snapshotWithWars(warLines = []) {
     'W15. and the war is still reported, and still blocks a claim on the pair',
     snap.wars.length === 1 && snap.warBetween(57275, 12) !== null,
     'a war with one unknown party is a war',
+  );
+}
+
+// --- Macro Event Library: almohad_collapse ----------------------------------
+//
+// The counterpart to iberian_pressure, and the tests are deliberately its
+// mirror: the same peninsula, read in the opposite direction. A world that
+// supports the strongest pressure must support no collapse at all, and the
+// reverse, because the two actions make opposite claims about the same ground.
+{
+  const iberia = (andalusi, other, date = '1222.1.1') => {
+    const realms = [
+      ...andalusi.map((c, i) => ({ id: 100 + i, ruler: `A${i}`, title: `Taifa ${i}`, rank: 'Duchy', tierKey: 'duchy', counties: c, culture: 'Andalusian' })),
+      ...other.map((c, i) => ({ id: 200 + i, ruler: `C${i}`, title: `Crown ${i}`, rank: 'Kingdom', tierKey: 'kingdom', counties: c, culture: 'Castilian' })),
+    ];
+    return snapshot({ realms, date, totalDays: 446_000 });
+  };
+  const bl = stubBaseline({ label: '= Duchy', risen: false, known: true });
+
+  const andalusiHeavy = iberia([30, 20], [8]);
+  const christianHeavy = iberia([6], [30, 25]);
+
+  check(
+    'AC1. the severity band is the mirror of the pressure band',
+    collapseBand(andalusiHeavy, bl).allowed.length === 0
+      && collapseBand(christianHeavy, bl).allowed.length === 3
+      && intensityBand(andalusiHeavy, bl).allowed.length === 3,
+    `Andalusian-heavy: collapse ${collapseBand(andalusiHeavy, bl).allowed.join(',') || 'none'} | `
+    + `Christian-heavy: collapse ${collapseBand(christianHeavy, bl).allowed.join(',')}`,
+  );
+
+  // The refusal that matters most. An intact power in 1222 is a campaign that
+  // diverged from the record, and the honest answer is to decline to narrate a
+  // collapse rather than to cause one and call it history.
+  const intact = validateProposal(
+    { action: 'almohad_collapse', args: { caliph: 100, claimants: [200], severity: 'fraying' } },
+    andalusiHeavy, bl,
+  );
+  check(
+    'AC2. an intact Almohad power is refused rather than dismantled to fit',
+    !intact.ok && /in possession of the peninsula/.test(intact.error),
+    intact.ok ? 'ACCEPTED a collapse of a power holding the peninsula' : intact.error,
+  );
+
+  // The 1222 case the live campaign is actually in: Andalusian ground reduced
+  // but not gone, which supports breaking and refuses shattered.
+  const midCollapse = iberia([12], [18, 14]);
+  const band = collapseBand(midCollapse, bl);
+  const tooFar = validateProposal(
+    { action: 'almohad_collapse', args: { caliph: 100, claimants: [200], severity: 'shattered' } },
+    midCollapse, bl,
+  );
+  check(
+    'AC3. an out-of-band severity is rejected with the figures behind it',
+    !tooFar.ok && /out of band/.test(tooFar.error) && /counties/.test(tooFar.error),
+    tooFar.ok ? `ACCEPTED though the band was ${band.allowed.join(',')}` : tooFar.error,
+  );
+
+  const breaking = validateProposal(
+    { action: 'almohad_collapse', args: { caliph: 100, claimants: [200, 201], severity: 'breaking' } },
+    midCollapse, bl,
+  );
+  check(
+    'AC4. and the severity the 1222 map does support is accepted',
+    breaking.ok,
+    breaking.ok ? `band: ${band.allowed.join(',')}` : breaking.error,
+  );
+
+  // Date. Outside the window this is a different century's collapse wearing
+  // this one's name.
+  const early = iberia([12], [18, 14], '1066.9.15');
+  const outOfTime = validateProposal(
+    { action: 'almohad_collapse', args: { caliph: 100, claimants: [200], severity: 'breaking' } },
+    early, bl,
+  );
+  check(
+    'AC5. a collapse proposed centuries early is refused on the date',
+    !outOfTime.ok && new RegExp(String(COLLAPSE_YEAR)).test(outOfTime.error),
+    outOfTime.ok ? 'ACCEPTED an Almohad collapse in 1066' : outOfTime.error,
+  );
+
+  // The subject has to be the party plausibly collapsing. Aimed at a Christian
+  // crown this is the Director inventing a different history entirely.
+  const wrongWay = validateProposal(
+    { action: 'almohad_collapse', args: { caliph: 200, claimants: [100], severity: 'breaking' } },
+    midCollapse, bl,
+  );
+  check(
+    'AC6. it cannot be turned around and aimed at a Christian crown',
+    !wrongWay.ok && /Andalusian or Maghrebi/.test(wrongWay.error),
+    wrongWay.ok ? 'ACCEPTED a Castilian Almohad collapse' : wrongWay.error,
+  );
+
+  // Someone outside the peninsula, on the same reasoning iberian_pressure uses.
+  const withOutsider = snapshot({
+    date: '1222.1.1',
+    totalDays: 446_000,
+    realms: [
+      { id: 1, ruler: 'al-Adil', title: 'Caliphate of Cordoba', rank: 'Empire', tierKey: 'empire', counties: 12, culture: 'Andalusian' },
+      { id: 2, ruler: 'C0', title: 'Crown 0', rank: 'Kingdom', tierKey: 'kingdom', counties: 30, culture: 'Castilian' },
+      { id: 3, ruler: 'Harald', title: 'Kingdom of Norway', rank: 'Kingdom', tierKey: 'kingdom', counties: 9, culture: 'Norse' },
+    ],
+  });
+  const outsider = validateProposal(
+    { action: 'almohad_collapse', args: { caliph: 1, claimants: [3], severity: 'breaking' } },
+    withOutsider, bl,
+  );
+  check(
+    'AC7. a claimant outside the peninsula is rejected',
+    !outsider.ok && /not of the peninsula/.test(outsider.error),
+    outsider.ok ? 'ACCEPTED a Norse claimant to al-Andalus' : outsider.error,
+  );
+
+  // The script, per severity: right level, right events, both branches, and
+  // none of the things this action promises never to do.
+  for (const key of SEVERITY_KEYS) {
+    const args = { caliph: 100, claimants: [200, 201], severity: key };
+    const world = key === 'shattered' ? christianHeavy : midCollapse;
+    const target = key === 'shattered' ? 100 : 100;
+    const a2 = { ...args, caliph: target };
+    const r = validateProposal({ action: 'almohad_collapse', args: a2 }, world, bl);
+    if (!r.ok) { check(`AC8.${key} script generation`, false, r.error); continue; }
+    const script = r.action.toScript(a2, 900, world).join('\n');
+    const level = SEVERITY[key].level;
+    check(
+      `AC8.${key} the script carries the level and fires both events, and transfers nothing`,
+      new RegExp(`hd_collapse_level value = ${level}`).test(script)
+        && /trigger_event = hd_event\.0220/.test(script)
+        && /trigger_event = hd_event\.0221/.test(script)
+        && /applied\/;\/900\/;\/almohad_collapse/.test(script)
+        && /refused\/;\/900\/;\/almohad_collapse/.test(script)
+        && !/start_war|add_pressed_claim|destroy_title|add_gold/.test(script),
+      `level ${level}, ${script.split('\n').length} lines`,
+    );
+  }
+
+  // The claimants are optional. A collapse nobody is placed to exploit is still
+  // a collapse, and refusing it would make the action require a beneficiary the
+  // record does not always supply.
+  const alone = { caliph: 100, claimants: [], severity: 'breaking' };
+  const solo = validateProposal({ action: 'almohad_collapse', args: alone }, midCollapse, bl);
+  const soloScript = solo.ok ? solo.action.toScript(alone, 901, midCollapse).join('\n') : '';
+  check(
+    'AC9. a collapse with no claimants named is allowed and fires only the collapse event',
+    solo.ok && /trigger_event = hd_event\.0220/.test(soloScript) && !/hd_event\.0221/.test(soloScript),
+    solo.ok ? 'no claimant scopes resolved' : solo.error,
+  );
+
+  // The preview is what the player approves against, and the defection chance
+  // is the one number in this action that a rounded phrase would misrepresent.
+  const preview = solo.ok ? solo.action.preview(alone, midCollapse, bl) : '';
+  check(
+    'AC10. the preview states the defection odds in words before approval',
+    /two-in-five/.test(preview) && /faction rather than a country/.test(preview),
+    preview.split('\n')[0] ?? 'no preview',
+  );
+
+  // The gate, on the same reasoning as momentum's and macro events': the whole
+  // action is mod content, and a mod that predates it would run the batch,
+  // report ok, and do none of it.
+  setCollapseSupport({ ok: false, version: '0.6.0', reason: 'the deployed companion mod is v0.6.0 and the Almohad collapse needs v0.7.0 or newer' });
+  const stale = validateProposal(
+    { action: 'almohad_collapse', args: { caliph: 100, claimants: [200], severity: 'breaking' } },
+    midCollapse, bl,
+  );
+  setCollapseSupport({ ok: true, version: null, reason: '' });
+  check(
+    'AC11. the toolkit refuses a collapse on a stale mod, before anything else',
+    !stale.ok && /v0\.7\.0 or newer/.test(stale.error),
+    stale.ok ? 'ACCEPTED against a mod with none of the content' : stale.error,
+  );
+}
+
+// --- Historical wars ---------------------------------------------------------
+//
+// The first action that starts a war, so these lean hardest on what keeps it
+// from being the wrong war: the window, the attacker being free to declare,
+// and the target not being already taken - the Valencia case, a war a live
+// campaign had already fought. The parties below are the live 1217 campaign's,
+// as a read-only probe reported them on 2026-09-11.
+{
+  const ARAGON = 60068;
+  const MALLORCA = 16856979;
+
+  /** A snapshot carrying the title lookups the historical war library asks for. */
+  const warSnap = ({ date = '1229.9.1', holders = {}, realms }) => {
+    const a = new SnapshotAssembler();
+    const feed = (line) => {
+      const rec = parseLine(`[00:00:00][effect.cpp:1]: ${line}`);
+      return rec ? a.ingest(rec) : null;
+    };
+    feed(`HD:/;/snapshot_begin/;/77/;/${date}/;/449000/;/1`);
+    for (const r of realms) {
+      feed(
+        `HD:/;/realm/;/${r.id}/;/${r.ruler}/;/${r.title}/;/${r.rank}/;/${r.counties ?? 5}` +
+        `/;/${r.culture ?? 'Catalan'}/;/${r.faith ?? 'Catholic'}/;/Zaragoza/;/Jimena/;/House Jimena/;/yes/;/Feudal`,
+      );
+      feed(`HD:/;/realm_tier/;/${r.id}/;/${r.tierKey}`);
+      feed(`HD:/;/realm_home/;/${r.id}`);
+      feed(`HD:/;/realm_near/;/${r.id}`);
+      feed(`HD:/;/realm_in_region/;/${r.id}/;/world_europe_west_iberia`);
+    }
+    for (const [title, h] of Object.entries(holders)) {
+      if (h === null) { feed(`HD:/;/title_holder/;/${title}/;/none`); continue; }
+      feed(`HD:/;/title_holder/;/${title}/;/${h.holder}`);
+      feed(`HD:/;/title_top/;/${title}/;/${h.top ?? h.holder}`);
+    }
+    return feed('HD:/;/snapshot_end/;/77').snapshot;
+  };
+
+  const realms = [
+    { id: ARAGON, ruler: 'Pero II', title: 'Kingdom of Aragon', rank: 'Kingdom', tierKey: 'kingdom', counties: 26 },
+    { id: MALLORCA, ruler: 'Baldu II', title: 'Kingdom of Mallorca', rank: 'Kingdom', tierKey: 'kingdom', counties: 6, culture: 'Sardinian' },
+  ];
+  const live = {
+    k_aragon: { holder: ARAGON, top: ARAGON },
+    d_mallorca: { holder: MALLORCA, top: MALLORCA },
+    c_mallorca: { holder: MALLORCA, top: MALLORCA },
+  };
+  const war = (st) => validateProposal({ action: 'historical_war', args: { war: 'conquest_of_majorca' } }, st, null);
+
+  const inWindow = warSnap({ holders: live, realms });
+  const ok = war(inWindow);
+  check(
+    'HW1. the Conquest of Majorca is offered in 1229 between the live holders',
+    ok.ok && /The Conquest of Majorca/.test(ok.preview) && /starts a real war/.test(ok.preview) && /can still lose/.test(ok.preview),
+    ok.ok ? ok.preview.split('\n')[0] : ok.error,
+  );
+
+  // The card that started all this: 1217, twelve years early.
+  const early = war(warSnap({ date: '1217.4.17', holders: live, realms }));
+  check(
+    'HW2. and refused in 1217, with the record date and when it opens',
+    !early.ok && /1229/.test(early.error) && /1224/.test(early.error),
+    early.ok ? 'ACCEPTED twelve years early' : early.error,
+  );
+
+  // The Valencia case: the land is already the attacker's.
+  const taken = war(warSnap({ holders: { ...live, c_mallorca: { holder: 555, top: ARAGON } }, realms }));
+  check(
+    'HW3. a war whose target land the attacker already holds is refused as already fought',
+    !taken.ok && /already holds/.test(taken.error),
+    taken.ok ? 'ACCEPTED a war already won' : taken.error,
+  );
+
+  const vassal = war(warSnap({ holders: { ...live, k_aragon: { holder: ARAGON, top: 999 } }, realms }));
+  check(
+    'HW4. a vassal holding the attacker title cannot declare it',
+    !vassal.ok && /vassal/.test(vassal.error),
+    vassal.ok ? 'ACCEPTED a vassal declaring a war of its own' : vassal.error,
+  );
+
+  const blind = war(warSnap({ holders: {}, realms }));
+  check(
+    'HW5. a snapshot without title lookups refuses rather than guesses',
+    !blind.ok && /does not report who holds/.test(blind.error),
+    blind.ok ? 'ACCEPTED with no idea who holds the Balearics' : blind.error,
+  );
+
+  setWarSupport({ ok: false, version: '0.7.0', reason: 'the deployed companion mod is v0.7.0 and historical wars need v0.8.0 or newer' });
+  const stale = war(inWindow);
+  setWarSupport({ ok: true, version: null, reason: '' });
+  check(
+    'HW6. the toolkit refuses a war on a stale mod, before anything else',
+    !stale.ok && /v0\.8\.0/.test(stale.error),
+    stale.ok ? 'ACCEPTED against a mod with no casus belli' : stale.error,
+  );
+
+  const script = ok.ok ? ok.action.toScript({ war: 'conquest_of_majorca' }, 500, inWindow).join('\n') : '';
+  check(
+    'HW7. the batch claims first, starts the named war, and reports which happened',
+    /add_pressed_claim = title:d_mallorca/.test(script)
+      && script.indexOf('add_pressed_claim') < script.indexOf('start_war')
+      && /cb = hd_conquest_of_majorca_cb/.test(script)
+      && /target_title = title:d_mallorca/.test(script)
+      && /hd_crusade_zeal/.test(script) && /hd_beleaguered_realm/.test(script)
+      && /using_cb = hd_conquest_of_majorca_cb/.test(script)
+      && /historical_war\/;\/war_started/.test(script)
+      && /historical_war\/;\/claim_only/.test(script)
+      && /refused\/;\/500\/;\/historical_war/.test(script)
+      && !/add_gold|add_prestige|destroy_title|hd_reconquista_momentum/.test(script),
+    `${script.split('\n').length} lines`,
+  );
+
+  // The pre-emption guard: a claim between the war's own parties.
+  const claim = (date) => validateProposal(
+    { action: 'grant_claim', args: { actor: ARAGON, target: MALLORCA } },
+    warSnap({ date, holders: live, realms }), null,
+  );
+  const preempt = claim('1217.4.17');
+  const afterwards = claim('1245.1.1');
+  check(
+    'HW8. a claim that would pre-empt the war is redirected to it, and only while it is still to come',
+    !preempt.ok && /Conquest of Majorca/.test(preempt.error) && /1224/.test(preempt.error)
+      && !(afterwards.error ?? '').includes('Conquest of Majorca'),
+    preempt.ok ? 'ACCEPTED the 1217 card' : preempt.error.slice(0, 120),
+  );
+
+  const cbFile = fs.readFileSync(path.join(ROOT_DIR, 'mod', 'common', 'casus_belli_types', 'hd_casus_belli_types.txt'), 'utf8');
+  const modFile = fs.readFileSync(path.join(ROOT_DIR, 'mod', 'common', 'modifiers', 'hd_modifiers.txt'), 'utf8');
+  const eventFile = fs.readFileSync(path.join(ROOT_DIR, 'mod', 'events', 'hd_events.txt'), 'utf8');
+  const locFile = fs.readFileSync(path.join(ROOT_DIR, 'mod', 'localization', 'english', 'hd_l_english.yml'), 'utf8');
+  const missing = [];
+  for (const w of Object.values(WARS)) {
+    if (!cbFile.includes(`${w.cb} = {`)) missing.push(`casus belli ${w.cb}`);
+    if (!/valid_to_start = \{ always = no \}/.test(cbFile)) missing.push('valid_to_start = { always = no }');
+    for (const m of [w.attackerModifier, w.defenderModifier]) if (!modFile.includes(`${m} = {`)) missing.push(`modifier ${m}`);
+    for (const e of [w.attackerEvent, w.defenderEvent]) if (!eventFile.includes(`${e} = {`)) missing.push(`event ${e}`);
+    for (const k of ['war_name', 'war_name_my', 'war_name_base', 'cb_name']) {
+      const keyName = `${w.cb.replace(/_cb$/, '')}_${k}`;
+      if (!locFile.includes(` ${keyName}:`)) missing.push(`localisation ${keyName}`);
+    }
+    if (!locFile.includes(w.warName.replace(/^The /, ''))) missing.push(`the name "${w.warName}" in localisation`);
+  }
+  check(
+    'HW9. every war names mod content that exists, and cannot be declared by hand',
+    missing.length === 0,
+    missing.length ? missing.join('; ') : `${Object.keys(WARS).length} war(s): casus belli, modifiers, events and war names defined`,
+  );
+
+  const withTitles = snapshotScript(['world_europe_west_iberia'], 1, [], [], warTitles()).join('\n');
+  const without = snapshotScript(['world_europe_west_iberia'], 1).join('\n');
+  const hostile = snapshotScript(['world_europe_west_iberia'], 1, [], [], ['k_x" add_gold = 999 "']).join('\n');
+  check(
+    'HW10. the snapshot looks up the war titles, only when asked, and only well-formed keys',
+    /title:d_mallorca = \{/.test(withTitles) && /title_holder\/;\/k_aragon/.test(withTitles) && /title_top\/;\/c_mallorca/.test(withTitles)
+      && !/title:[a-z]_/.test(without) && !/add_gold/.test(hostile),
+    `${warTitles().join(', ')} looked up`,
+  );
+
+  const parsed = warSnap({ holders: { ...live, d_mallorca: null }, realms });
+  const mallorca = parsed.titleHolders.get('c_mallorca');
+  const duchy = parsed.titleHolders.get('d_mallorca');
+  check(
+    'HW11. title lookups arrive on the snapshot, holder and top liege, and "none" as nobody',
+    mallorca?.holder === MALLORCA && mallorca?.top === MALLORCA && duchy?.holder === null,
+    `c_mallorca ${JSON.stringify(mallorca)}, d_mallorca ${JSON.stringify(duchy)}`,
+  );
+}
+
+// --- The claim tier cap, and Castile's wars ----------------------------------
+//
+// The card that prompted the cap, from the same live 1217 campaign: Castile,
+// with reconquista momentum, handed a pressed claim on the Mu'minid Empire's own
+// title so it could take the Almohads' last three holdings in Iberia. On
+// victory that claim transfers the empire, Morocco included.
+{
+  const CASTILE = 59772;
+  const MUMINID = 56730;
+  const NAVARRA = 70001;
+  const ARAGON = 60068;
+  const MALLORCA = 16856979;
+
+  const snap = ({ date = '1236.3.1', holders = {} } = {}) => {
+    const a = new SnapshotAssembler();
+    const feed = (line) => {
+      const rec = parseLine(`[00:00:00][effect.cpp:1]: ${line}`);
+      return rec ? a.ingest(rec) : null;
+    };
+    feed(`HD:/;/snapshot_begin/;/88/;/${date}/;/451000/;/1`);
+    const realms = [
+      { id: CASTILE, ruler: 'Alfonso IX', title: 'Kingdom of Castile', rank: 'Kingdom', tier: 'kingdom', counties: 35, culture: 'Castilian' },
+      { id: MUMINID, ruler: 'Caliph Idris', title: 'Muminid Empire', rank: 'Empire', tier: 'empire', counties: 27, culture: 'Andalusian', faith: 'Sunni' },
+      { id: NAVARRA, ruler: 'Sancho VII', title: 'Kingdom of Navarra', rank: 'Kingdom', tier: 'kingdom', counties: 5, culture: 'Basque' },
+      { id: ARAGON, ruler: 'Pero II', title: 'Kingdom of Aragon', rank: 'Kingdom', tier: 'kingdom', counties: 26, culture: 'Catalan' },
+      { id: MALLORCA, ruler: 'Baldu II', title: 'Kingdom of Mallorca', rank: 'Kingdom', tier: 'kingdom', counties: 6, culture: 'Sardinian' },
+    ];
+    for (const r of realms) {
+      feed(
+        `HD:/;/realm/;/${r.id}/;/${r.ruler}/;/${r.title}/;/${r.rank}/;/${r.counties}` +
+        `/;/${r.culture}/;/${r.faith ?? 'Catholic'}/;/Toledo/;/Anscarid/;/House Anscarid/;/yes/;/Feudal`,
+      );
+      feed(`HD:/;/realm_tier/;/${r.id}/;/${r.tier}`);
+      feed(`HD:/;/realm_home/;/${r.id}`);
+      feed(`HD:/;/realm_near/;/${r.id}`);
+      feed(`HD:/;/realm_in_region/;/${r.id}/;/world_europe_west_iberia`);
+    }
+    for (const [title, h] of Object.entries(holders)) {
+      feed(`HD:/;/title_holder/;/${title}/;/${h}`);
+      feed(`HD:/;/title_top/;/${title}/;/${h}`);
+    }
+    return feed('HD:/;/snapshot_end/;/88').snapshot;
+  };
+
+  const live = {
+    k_castille: CASTILE, d_cordoba: MUMINID, c_cordoba: MUMINID, d_sevilla: MUMINID, c_sevilla: MUMINID,
+    k_aragon: ARAGON, d_mallorca: MALLORCA, c_mallorca: MALLORCA,
+  };
+
+  // The live card, verbatim.
+  const card = validateProposal(
+    { action: 'grant_claim', args: { actor: CASTILE, target: MUMINID, momentum: 'reconquista' } },
+    snap({ date: '1217.8.7', holders: live }), null,
+  );
+  check(
+    'HW12. the 1217 card - a claim on the Mu\'minid Empire itself - is refused by the tier cap',
+    !card.ok && /empire-tier/.test(card.error) && /whole empire/.test(card.error),
+    card.ok ? 'ACCEPTED a claim that would make Castile Almohad emperor' : card.error.slice(0, 110),
+  );
+
+  const spawn = validateProposal(
+    { action: 'spawn_character', args: { name: 'Fernando', sex: 'male', age: 30, host: CASTILE, claim: MUMINID } },
+    snap({ holders: live }), null,
+  );
+  check(
+    'HW13. and spawn_character cannot carry the same claim in through the side door',
+    !spawn.ok && /empire-tier/.test(spawn.error),
+    spawn.ok ? 'ACCEPTED a claimant to the whole empire' : spawn.error.slice(0, 110),
+  );
+
+  const kingdom = validateProposal(
+    { action: 'grant_claim', args: { actor: CASTILE, target: NAVARRA } },
+    snap({ holders: live }), null,
+  );
+  check(
+    'HW14. a kingdom-tier claim is untouched by the cap',
+    !(kingdom.error ?? '').includes('empire-tier'),
+    kingdom.ok ? 'accepted' : `refused for another reason: ${kingdom.error.slice(0, 90)}`,
+  );
+
+  const cordoba = validateProposal({ action: 'historical_war', args: { war: 'conquest_of_cordoba' } }, snap({ holders: live }), null);
+  check(
+    'HW15. the Conquest of Córdoba is offered in 1236, Castile against whoever holds the city',
+    cordoba.ok && /The Conquest of Córdoba/.test(cordoba.preview) && /Alfonso IX/.test(cordoba.preview)
+      && /a lost war/.test(cordoba.preview) && !/a lost reconquest/.test(cordoba.preview),
+    cordoba.ok ? cordoba.preview.split('\n')[0] : cordoba.error,
+  );
+
+  // One mod version behind: Majorca's casus belli is there, Castile's is not.
+  setWarSupport({ ok: true, version: '0.8.0', reason: '' });
+  const behind = validateProposal({ action: 'historical_war', args: { war: 'conquest_of_cordoba' } }, snap({ holders: live }), null);
+  const stillFine = validateProposal({ action: 'historical_war', args: { war: 'conquest_of_majorca' } }, snap({ date: '1229.9.1', holders: live }), null);
+  setWarSupport({ ok: true, version: null, reason: '' });
+  check(
+    'HW16. a mod that carries one war but not the next refuses only the missing one',
+    !behind.ok && /v0\.9\.0/.test(behind.error) && stillFine.ok,
+    behind.ok ? 'ACCEPTED Cordoba on a mod with no casus belli for it' : `${behind.error.slice(0, 70)} | majorca: ${stillFine.ok ? 'ok' : stillFine.error}`,
+  );
+
+  const crossed = [];
+  for (const [key, w] of Object.entries(WARS)) {
+    const script = warScript(key, 1).join('\n');
+    const own = [`cb = ${w.cb}`, `title:${w.attackerTitle}`, `title:${w.targetTitle}`, `title:${w.anchorCounty}`, w.attackerModifier, w.defenderModifier, w.attackerEvent];
+    for (const needle of own) if (!script.includes(needle)) crossed.push(`${key} lacks ${needle}`);
+    for (const [other, o] of Object.entries(WARS)) if (other !== key && script.includes(`cb = ${o.cb}`)) crossed.push(`${key} names ${o.cb}`);
+  }
+  check(
+    'HW17. every war\'s batch names its own casus belli, titles, modifiers and event, and no other war\'s',
+    crossed.length === 0,
+    crossed.length ? crossed.join('; ') : `${Object.keys(WARS).length} wars checked`,
+  );
+
+  const early = warBriefing(snap({ date: '1217.8.7', holders: live }), 1217);
+  check(
+    'HW18. in 1217 the model is told Castile\'s wars are scheduled, and when they open',
+    /Do not pre-empt/.test(early) && /The Conquest of Córdoba/.test(early) && /offered from 1231/.test(early)
+      && /The Conquest of Seville/.test(early) && /offered from 1243/.test(early),
+    early.split('\n').slice(0, 2).join(' | ').slice(0, 140),
+  );
+}
+
+// --- Beyond Iberia: the Albigensian Crusade -----------------------------------
+//
+// The same machinery on different ground, to show it was never Iberian: France
+// against whoever holds Toulouse, over the duchy.
+{
+  const FRANCE = 3001;
+  const TOULOUSE = 3002;
+
+  const snap = ({ date = '1226.6.1', holders = {} } = {}) => {
+    const a = new SnapshotAssembler();
+    const feed = (line) => {
+      const rec = parseLine(`[00:00:00][effect.cpp:1]: ${line}`);
+      return rec ? a.ingest(rec) : null;
+    };
+    feed(`HD:/;/snapshot_begin/;/99/;/${date}/;/452000/;/1`);
+    for (const r of [
+      { id: FRANCE, ruler: 'Louis VIII', title: 'Kingdom of France', rank: 'Kingdom', tier: 'kingdom', counties: 40, culture: 'French' },
+      { id: TOULOUSE, ruler: 'Raymond VII', title: 'Duchy of Toulouse', rank: 'Duchy', tier: 'duchy', counties: 6, culture: 'Occitan' },
+    ]) {
+      feed(
+        `HD:/;/realm/;/${r.id}/;/${r.ruler}/;/${r.title}/;/${r.rank}/;/${r.counties}` +
+        `/;/${r.culture}/;/Catholic/;/Paris/;/Capet/;/House Capet/;/yes/;/Feudal`,
+      );
+      feed(`HD:/;/realm_tier/;/${r.id}/;/${r.tier}`);
+      feed(`HD:/;/realm_home/;/${r.id}`);
+      feed(`HD:/;/realm_near/;/${r.id}`);
+      feed(`HD:/;/realm_in_region/;/${r.id}/;/world_europe_west_francia`);
+    }
+    for (const [title, h] of Object.entries(holders)) {
+      feed(`HD:/;/title_holder/;/${title}/;/${h.holder ?? h}`);
+      feed(`HD:/;/title_top/;/${title}/;/${h.top ?? h}`);
+    }
+    return feed('HD:/;/snapshot_end/;/99').snapshot;
+  };
+
+  const live = { k_france: FRANCE, d_toulouse: TOULOUSE, c_toulouse: TOULOUSE };
+  const war = (st) => validateProposal({ action: 'historical_war', args: { war: 'albigensian_crusade' } }, st, null);
+
+  const ok = war(snap({ holders: live }));
+  check(
+    'HW19. the Albigensian Crusade is offered in 1226, France against whoever holds Toulouse',
+    ok.ok && /The Albigensian Crusade/.test(ok.preview) && /Louis VIII/.test(ok.preview) && /a lost crusade/.test(ok.preview),
+    ok.ok ? ok.preview.split('\n')[0] : ok.error,
+  );
+
+  const early = war(snap({ date: '1219.3.3', holders: live }));
+  check(
+    'HW20. and in 1219 it is too early, with the record date and when it opens',
+    !early.ok && /1226/.test(early.error) && /1221/.test(early.error),
+    early.ok ? 'ACCEPTED seven years early' : early.error,
+  );
+
+  const taken = war(snap({ holders: { ...live, c_toulouse: { holder: 4444, top: FRANCE } } }));
+  check(
+    'HW21. and refused as already fought if the crown already holds Toulouse',
+    !taken.ok && /already holds/.test(taken.error),
+    taken.ok ? 'ACCEPTED a crusade the crown had already won' : taken.error,
   );
 }
 

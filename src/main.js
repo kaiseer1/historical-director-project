@@ -1,5 +1,7 @@
 import { loadConfig, describeConfig } from './config.js';
 import { LogTailer } from './bridge/LogTailer.js';
+import { LogBudget, clearGapMs } from './bridge/LogBudget.js';
+import { assess as assessLiveness } from './bridge/Liveness.js';
 import { RunFileManager } from './bridge/RunFileManager.js';
 import { SnapshotAssembler, belligerentName } from './model/WorldState.js';
 import { LoreBook } from './lore/LoreBook.js';
@@ -20,10 +22,12 @@ import { preflight, problemCount } from './setup/preflight.js';
 // Two similarly named things, kept apart on purpose: modVersion's resolves the
 // answer by reading the deployed descriptor, momentum's reports the answer the
 // toolkit is currently acting on.
-import { momentumSupport as resolveMomentumSupport, macroSupport as resolveMacroSupport, momentSupport as resolveMomentSupport, setObservedModVersion, observedModVersion } from './setup/modVersion.js';
+import { momentumSupport as resolveMomentumSupport, macroSupport as resolveMacroSupport, momentSupport as resolveMomentSupport, collapseSupport as resolveCollapseSupport, warSupport as resolveWarSupport, logClearSupport as resolveLogClearSupport, setObservedModVersion, observedModVersion } from './setup/modVersion.js';
 import { setMomentumSupport, momentumSupport as momentumSupportState } from './director/momentum.js';
 import { setMacroSupport, macroSupport as macroSupportState } from './director/macroEvents.js';
 import { setMomentSupport, momentSupport as momentSupportState } from './director/moments.js';
+import { setCollapseSupport, collapseSupport as collapseSupportState } from './director/almohadCollapse.js';
+import { setWarSupport, warSupport as warSupportState, warTitles } from './director/historicalWars.js';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -72,7 +76,23 @@ const loreBook = new LoreBook(cfg.loreBookPath);
 const baseline = new Baseline(cfg.baselinePath);
 const auditClock = new AuditClock(cfg.auditClockPath);
 const runFile = new RunFileManager(cfg.ck3UserFolder);
-const tailer = new LogTailer(cfg.debugLogPath);
+const tailer = new LogTailer(cfg.debugLogPath, { errorLogPath: cfg.errorLogPath });
+
+/**
+ * How much of CK3's log budget this session has spent.
+ *
+ * The engine stops logging after roughly 17MB of cumulative writes and only
+ * `log.clearAll` resets that; see bridge/LogBudget.js for why truncating the
+ * file from outside does not work. The Director is a heavy writer, so this is
+ * a wall a long campaign reaches rather than a theoretical one.
+ */
+const logBudget = new LogBudget({
+  thresholdMB: cfg.director.logClearThresholdMB,
+  // Three pump ticks, floored at eight seconds, rather than a flat thirty: a
+  // campaign played at speed put 46.8MB through the logs in one thirty-second
+  // window. See clearGapMs.
+  minGapMs: clearGapMs(cfg.director.pumpIntervalSeconds),
+});
 const assembler = new SnapshotAssembler();
 const llm = new LLMClient(cfg.llm);
 
@@ -107,6 +127,16 @@ const state = {
   pending: null,
   /** When that request was staged, for working out whether the pump is dead. */
   pendingSince: 0,
+  /**
+   * When one of our records last arrived, as distinct from when the log last
+   * grew at all. The difference between those two is what tells a dead pump
+   * apart from a dead log subsystem; see bridge/Liveness.js.
+   */
+  lastRecordAt: 0,
+  /** @type {{kind: string, text: string, detail: string} | null} */
+  banner: null,
+  /** Whether the deployed mod can service a log clear at all. */
+  logClear: { ok: false, reason: 'not checked yet' },
   /** null until we have evidence either way. */
   /** @type {boolean|null} */
   pumpAlive: null,
@@ -188,7 +218,10 @@ function requestSnapshot(regions, homeRegions, nearRegions) {
   }
   state.pendingSince = Date.now();
   const token = runFile.nextToken();
-  runFile.write(snapshotScript(regions, token, homeRegions, nearRegions), token);
+  // The historical war library's titles ride along with every snapshot. A few
+  // lines each, and asked about whatever the sphere is, because who holds the
+  // Balearics decides whether the Conquest of Majorca is still to come.
+  runFile.write(snapshotScript(regions, token, homeRegions, nearRegions, warTitles()), token);
   log(`requested a snapshot of ${labelList(regions)}`);
 }
 
@@ -198,7 +231,18 @@ function requestSnapshot(regions, homeRegions, nearRegions) {
 
 tailer.on('status', (m) => log(m));
 
+tailer.on('cleared', ({ bytesBefore }) => {
+  // Either a clear we asked for has landed or the player restarted the game.
+  // Both mean the engine's cumulative write counter is back to zero, which is
+  // the only thing the budget cares about.
+  logBudget.confirmedClear();
+  if (bytesBefore > 0) {
+    log(`the game log was cleared after ${(bytesBefore / (1024 * 1024)).toFixed(1)}MB; CK3 can keep logging`);
+  }
+});
+
 tailer.on('record', async (rec) => {
+  state.lastRecordAt = Date.now();
   const out = assembler.ingest(rec);
   if (!out) return;
 
@@ -342,6 +386,10 @@ tailer.on('record', async (rec) => {
       break;
     }
 
+    case 'logClearRequested':
+      log(`the game acknowledged the log-clear request (slot ${out.slot})`);
+      break;
+
     case 'eventFired':
       // Remembered so the applied line that follows can say whether the event
       // really fired. An event blocked by its own trigger does nothing at all,
@@ -360,6 +408,14 @@ tailer.on('record', async (rec) => {
           ? `the game confirmed ${state.lastEventFired.event} reached the ruler`
           : 'the batch ran, but the event did not fire: its own trigger was not met, so nothing reached the ruler');
         state.lastEventFired = null;
+      } else if (out.action === 'historical_war') {
+        // Which of the two outcomes the batch saw: the named war running, or
+        // the game refusing the casus belli and leaving the claim to be
+        // pressed. Both are "applied" - something changed - and the player is
+        // owed the difference rather than a single "took effect".
+        log(out.subject === 'war_started'
+          ? 'the game confirmed the war has begun, under its historical name'
+          : 'the war did NOT start - the game refused the casus belli - so the attacker holds the pressed claim and the zeal to press it by ordinary means');
       } else {
         log(`the game confirmed ${out.action} took effect`);
       }
@@ -509,6 +565,16 @@ function momentState() {
   return { ok: m.ok, version: m.version, reason: m.reason, checked: m.checked };
 }
 
+function collapseState() {
+  const m = collapseSupportState();
+  return { ok: m.ok, version: m.version, reason: m.reason, checked: m.checked };
+}
+
+function warState() {
+  const m = warSupportState();
+  return { ok: m.ok, version: m.version, reason: m.reason, checked: m.checked };
+}
+
 function publicState() {
   return {
     connected: state.connected,
@@ -524,6 +590,14 @@ function publicState() {
     player: state.snapshot?.player ?? null,
     awaitingApply: state.awaitingApply ? state.awaitingApply.proposal.preview : null,
     pumpAlive: state.pumpAlive,
+    banner: state.banner,
+    log: {
+      // Shown so a long campaign can see the wall coming rather than meet it.
+      mbSinceClear: Number((tailer.bytesSinceClear / (1024 * 1024)).toFixed(2)),
+      thresholdMB: Number((logBudget.thresholdBytes / (1024 * 1024)).toFixed(2)),
+      clears: logBudget.confirmed,
+      supported: state.logClear.ok,
+    },
     lastRefusal: state.lastRefusal ?? null,
     lastAudit: state.lastAudit,
     config: {
@@ -538,6 +612,8 @@ function publicState() {
       momentum: momentumState(),
       macro: macroState(),
       moment: momentState(),
+      collapse: collapseState(),
+      war: warState(),
       sphereMax: cfg.director.sphereMax,
       maxRealmsInPrompt: cfg.director.maxRealmsInPrompt,
       knowledge: cfg.knowledge.enabled,
@@ -591,10 +667,35 @@ const { server, broadcast } = createServer({
   ping: () => ({ ok: true }),
 });
 
+/**
+ * How often the mod's pump picks the run file up, in milliseconds.
+ *
+ * Read from config because it is now the player's to set, and every timeout
+ * below is expressed in multiples of it. That is the point of deriving them
+ * rather than hardcoding seconds: at a ten-second pump a fifteen-second
+ * acknowledgment window would report a perfectly healthy bridge as dead on
+ * roughly every other batch, and the player would go and use Recall on a pump
+ * that was about to answer.
+ */
+const PUMP_MS = (cfg.director.pumpIntervalSeconds ?? 2) * 1000;
+
 // A staged request that goes unanswered for this long means the pump is not
 // running. Wall-clock rather than game time on purpose: a paused game still
 // has a live pump, and a fast-forwarded one is not more broken than a slow one.
-const PUMP_TIMEOUT_MS = 25_000;
+//
+// Five pump cycles, floored at the 25 seconds this was before the interval
+// became configurable, so the default behaviour is unchanged.
+const PUMP_TIMEOUT_MS = Math.max(25_000, PUMP_MS * 5);
+
+/**
+ * How long a clear request stays staged before the run file is retired.
+ *
+ * Was a flat three seconds, which silently stopped working the moment the pump
+ * could be slower than that: the request would be written and wiped again
+ * between two ticks, so the log would never be cleared and the budget would ask
+ * again forever. Two cycles, floored at the old value.
+ */
+const CLEAR_RETIRE_MS = Math.max(3_000, PUMP_MS * 2);
 
 setInterval(() => {
   if (!state.pending) return;
@@ -604,6 +705,95 @@ setInterval(() => {
   state.pumpAlive = false;
   log('no answer from the game: the execution pump does not seem to be running');
   broadcast('state', publicState());
+}, 5_000);
+
+
+// --------------------------------------------------------------------------
+// Keeping the bridge alive
+// --------------------------------------------------------------------------
+
+/**
+ * Is the run file holding something we are still waiting on an answer for?
+ *
+ * Two separate things make this true and both matter. `pending` is a locate
+ * or snapshot request; `awaitingApply` is an approved action. Either way the
+ * staged file is not ours to overwrite - and a log clear would do exactly
+ * that, because there is only one run file and one pump reading it.
+ *
+ * The second reason is subtler and worse. `log.clearAll` destroys the echo an
+ * in-flight batch is about to write, so the orchestrator would wait out the
+ * acknowledgment timeout and report a dead pump for a batch that ran
+ * perfectly. Waiting costs bytes. Clearing costs the truth.
+ */
+function ackPending() {
+  return state.pending !== null || state.awaitingApply !== null;
+}
+
+/**
+ * Ask the game to clear its own log, if it is time and nothing is in flight.
+ *
+ * The request is a global variable the mod's widget is watching; see
+ * bridge/LogBudget.js for why it cannot simply be done here. The run file is
+ * cleared straight afterwards rather than left standing, because the pump
+ * re-runs whatever it finds every two seconds and a standing request would
+ * clear the log on every pass until something else overwrote it.
+ */
+function maybeRequestLogClear() {
+  const verdict = logBudget.due({
+    bytesSinceClear: tailer.bytesSinceClear,
+    pendingAck: ackPending(),
+    supported: state.logClear.ok,
+  });
+  if (!verdict.due) return;
+
+  const slot = logBudget.staged();
+  const token = runFile.nextToken();
+  runFile.write(LogBudget.requestScript(slot), token);
+  log(
+    `asked the game to clear its log (slot ${slot}, ${(tailer.bytesSinceClear / (1024 * 1024)).toFixed(1)}MB read since the last one). ` +
+    'CK3 can stop logging after as little as 17MB in a session, and only an in-game clear resets that.',
+  );
+
+  // Retired immediately. The batch is one-shot by its token guard anyway, but
+  // leaving it staged would block the next snapshot request behind it.
+  setTimeout(() => {
+    if (!ackPending()) runFile.clear();
+  }, CLEAR_RETIRE_MS);
+}
+
+/**
+ * Work out whether the bridge has gone quiet, and if so, in which of the two
+ * ways it can. See bridge/Liveness.js: they need opposite responses from the
+ * player, so a wrong guess sends them to fix the wrong thing.
+ */
+function checkLiveness() {
+  const banner = assessLiveness({
+    now: Date.now(),
+    everResponded: state.connected,
+    lastLineAt: tailer.lastLineAt,
+    lastRecordAt: state.lastRecordAt,
+    pendingSince: state.pending || state.awaitingApply ? state.pendingSince : null,
+    bytesSinceClear: tailer.bytesSinceClear,
+    thresholdBytes: logBudget.thresholdBytes,
+    stallMs: (cfg.director.stallMinutes ?? 2) * 60_000,
+    ackMs: Math.max((cfg.director.ackTimeoutSeconds ?? 15) * 1000, PUMP_MS * 4),
+  });
+
+  // Only announced on the way in and the way out, because this runs every
+  // five seconds and a banner that re-logged itself would bury the campaign.
+  const was = state.banner?.kind ?? null;
+  const now = banner?.kind ?? null;
+  if (was === now) return;
+
+  state.banner = banner;
+  if (banner) log(`${banner.text} ${banner.detail}`);
+  else log('the game is talking to us again');
+  broadcast('state', publicState());
+}
+
+setInterval(() => {
+  maybeRequestLogClear();
+  checkLiveness();
 }, 5_000);
 
 // --------------------------------------------------------------------------
@@ -632,16 +822,30 @@ function checkModCapabilities() {
   const moment = resolveMomentSupport(cfg.ck3UserFolder);
   setMomentSupport(moment);
 
-  const version = mom.version ?? macro.version ?? moment.version;
-  if (mom.ok && macro.ok && moment.ok) {
-    log(`companion mod v${version} deployed; momentum, macro events and the moment library available`);
+  const collapse = resolveCollapseSupport(cfg.ck3UserFolder);
+  setCollapseSupport(collapse);
+
+  const war = resolveWarSupport(cfg.ck3UserFolder);
+  setWarSupport(war);
+
+  // Not handed to a module the way the others are: nothing in the toolkit
+  // depends on it, because clearing the log is maintenance and never touches
+  // game state. It only decides whether asking is worth doing.
+  state.logClear = resolveLogClearSupport(cfg.ck3UserFolder);
+
+  const version = mom.version ?? macro.version ?? moment.version ?? collapse.version ?? war.version;
+  if (mom.ok && macro.ok && moment.ok && collapse.ok && war.ok) {
+    log(`companion mod v${version} deployed; momentum, macro events, the moment library, the Almohad collapse and historical wars available`);
   } else {
     if (version) log(`companion mod v${version} deployed`);
     if (!mom.ok) log(`momentum unavailable: ${mom.reason}`);
     if (!macro.ok) log(`macro events unavailable: ${macro.reason}`);
     if (!moment.ok) log(`historical moments unavailable: ${moment.reason}`);
+    if (!collapse.ok) log(`the Almohad collapse is unavailable: ${collapse.reason}`);
+    if (!war.ok) log(`historical wars are unavailable: ${war.reason}`);
+    if (!state.logClear.ok) log(`log clearing unavailable: ${state.logClear.reason}. CK3 can stop logging after as little as 17MB in a session; a long campaign will need a restart.`);
   }
-  return { momentum: mom, macro, moment };
+  return { momentum: mom, macro, moment, collapse, war };
 }
 
 /**
@@ -680,7 +884,7 @@ function packagedSetup() {
     }
   }
 
-  const result = deployMod(cfg.ck3UserFolder);
+  const result = deployMod(cfg.ck3UserFolder, { pumpIntervalSeconds: cfg.director.pumpIntervalSeconds });
   if (result.ok) {
     log(`companion mod deployed: ${result.files} files to ${result.dest}`);
   } else {

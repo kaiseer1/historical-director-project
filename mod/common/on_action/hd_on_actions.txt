@@ -16,11 +16,36 @@
 # obvious hook does not help either: on_game_start_after_lobby fires when the
 # player leaves the lobby, and loading a save from the main menu never passes
 # through it. So the pump reports its own liveness instead. Every batch the
-# orchestrator stages sets a flag; once a year the watchdog asks whether that
-# flag has been set since it last looked, and rebuilds the pump if it has not.
+# orchestrator stages sets a flag; the watchdog asks whether that flag has been
+# set since it last looked, and rebuilds the pump if it has not.
+#
+# That check runs quarterly rather than yearly. Fullscreen event windows kill
+# console-created widgets silently and often - crusade calls, successions,
+# incoming letters - and a yearly check meant the pump could be dead for up to
+# a game year with nothing but the Recall decision to notice it.
+#
+# Quarterly rather than monthly because the engine has no monthly global pulse.
+# `yearly_global_pulse` is the only global one it offers; the full list is in
+# common/on_action/_on_actions.info, and quarterly_playable_pulse is the
+# fastest attested hook that reaches a player. It carries a character root and
+# fires for every playable character on the map, so the effect below is gated
+# to the player - a watchdog that fired for four hundred counts would ask four
+# hundred times whether one widget exists.
+#
+# A quarter is still slow. The real defence is the re-arm network on the event
+# windows themselves; this is the net under it.
+#
+# It is still conditional, and deliberately. Rebuilding unconditionally would
+# mean firing hd_event.0001 at the player every month, and 0001 is a visible
+# popup - a fix that interrupts the campaign twelve times a year to solve a
+# problem the player does not have is not a fix.
 
 on_game_start_after_lobby = {
 	on_actions = { hd_bootstrap_on_action }
+}
+
+quarterly_playable_pulse = {
+	on_actions = { hd_watchdog_on_action }
 }
 
 yearly_global_pulse = {
@@ -45,16 +70,25 @@ hd_yearly_on_action = {
 		every_player = {
 			hd_heartbeat = yes
 		}
+	}
+}
 
+# The pump watchdog, on its own hook so its cadence can differ from the audit's.
+hd_watchdog_on_action = {
+	effect = {
+		# Root is a playable character here, not the world, and this fires for
+		# every one of them. Only the player's pass does any work.
 		if = {
-			limit = {
-				NOT = { has_global_variable = hd_pump_alive }
-			}
-			every_player = {
+			limit = { is_ai = no }
+
+			if = {
+				limit = {
+					NOT = { has_global_variable = hd_pump_alive }
+				}
 				trigger_event = hd_event.0001
 			}
-		}
 
-		remove_global_variable = hd_pump_alive
+			remove_global_variable = hd_pump_alive
+		}
 	}
 }

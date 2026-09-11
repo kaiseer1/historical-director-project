@@ -19,6 +19,8 @@ import { expectationFor } from './bookmarkTiers.js';
 import { MOMENTUM, MOMENTUM_KEYS, isMomentum, momentumOf, momentumScript, momentumPreview, momentumSupport } from './momentum.js';
 import { INTENSITY, INTENSITY_KEYS, MAX_PARTNERS, intensityBand, iberianPressureScript, inRegion, hasRegionData, IBERIA_REGION, macroSupport } from './macroEvents.js';
 import { MOMENTS, MOMENT_KEYS, isMoment, inWindow, windowError, momentScript, momentPreview, momentSupport, targetTierError } from './moments.js';
+import { SEVERITY, SEVERITY_KEYS, MAX_CLAIMANTS, COLLAPSE_YEAR, COLLAPSE_SPAN, collapseBand, almohadCollapseScript, inWindow as inCollapseWindow, collapseSupport } from './almohadCollapse.js';
+import { WARS, WAR_KEYS, isWar, warWindowError, warModError, warParties, warPreview, warScript, warSupport, curatedWarConflict } from './historicalWars.js';
 
 /** Characters CK3 script treats structurally. Never let these through. */
 const UNSAFE = /["'{}\[\]$\\=#\r\n\t]/g;
@@ -228,6 +230,16 @@ function distanceNote(state, ids) {
  * @returns {boolean}
  */
 const IBERIAN_CULTURES = /andalus|castil|catalan|portug|basque|galician|asturleon|aragon|mozarab|visigoth|suebi|navarr/i;
+
+/**
+ * Whose collapse this action is allowed to describe.
+ *
+ * Culture rather than faith, because the claim being made is about a specific
+ * Maghrebi-Andalusi political order coming apart, not about Islam losing ground:
+ * an Iberian realm that has converted is not the Almohad state, and the Almohad
+ * state's Berber core is not Andalusi. Both belong here; a Castilian does not.
+ */
+const COLLAPSING_CULTURES = /andalus|berber|maghreb|bedouin|arab|masmuda|zanata|sanhaja/i;
 
 function isIberian(realm, geographyAvailable) {
   if (geographyAvailable) return inRegion(realm, IBERIA_REGION) === true;
@@ -835,6 +847,233 @@ export const TOOLKIT = {
   },
 
   /**
+   * A power coming apart, and the neighbours who will divide it.
+   *
+   * The second macro action, and the counterpart to iberian_pressure rather
+   * than a variant of it: that one gathers a peninsula around a unifier, this
+   * one takes a state apart from the inside. Both can be true of Iberia in the
+   * same decade, which is why they are separate actions with separate bands.
+   *
+   * It is also the only action in the toolkit that moves a character who did not
+   * choose to move - a landed vassal may be rolled into an independence faction
+   * against a liege they were content with yesterday. See the header of
+   * director/almohadCollapse.js for what keeps that inside the project's rules
+   * and what it costs; the short version is that the engine keeps its veto, a
+   * faction is a demand rather than a country, and the preview states the odds
+   * in words before anyone approves anything.
+   */
+  almohad_collapse: {
+    signature: 'almohad_collapse',
+    description:
+      'Stage the disintegration of a Muslim power in Iberia after Las Navas de Tolosa: not a defeat in the field, '
+      + 'but provinces ceasing to obey. The collapsing ruler loses revenue, levies and - decisively - the regard of '
+      + 'their own vassals, some of whom raise independence factions at once. Neighbours you name are offered an '
+      + 'appetite for acting on it, which they may refuse. It transfers no titles and starts no wars. '
+      + 'The severity you may ask for is bounded by how much ground the Andalusian realms still hold, and an '
+      + 'intact power is refused outright rather than dismantled to fit the request.',
+    parameters: {
+      type: 'object',
+      properties: {
+        caliph: { type: 'integer', description: 'Character id of the ruler whose realm is coming apart' },
+        claimants: {
+          type: 'array',
+          items: { type: 'integer' },
+          maxItems: MAX_CLAIMANTS,
+          description: `Up to ${MAX_CLAIMANTS} character ids of rulers positioned to take the ground. Christian crown or breakaway emirate alike. May be empty.`,
+        },
+        severity: {
+          type: 'string',
+          enum: SEVERITY_KEYS,
+          description:
+            'How far gone the collapse is. fraying: authority slipping, one vassal in seven leaves now. '
+            + 'breaking: the historical 1220s, two in five. shattered: the third taifas, three in five. '
+            + 'The live state decides which of these is available.',
+        },
+      },
+      required: ['caliph', 'claimants', 'severity'],
+      additionalProperties: false,
+    },
+
+    validate(a, state, baseline) {
+      // First, for the same reason iberian_pressure and historical_moment check
+      // it first: five modifiers, an opinion modifier and three events all live
+      // in the mod, and a mod that predates them runs the batch, reports ok, and
+      // does none of it.
+      const mod = collapseSupport();
+      if (!mod.ok) return `almohad_collapse cannot be executed: ${mod.reason}`;
+
+      const caliph = safeInt(a.caliph);
+      if (caliph === null || !state.realmsById.has(caliph)) {
+        return `caliph ${a.caliph} is not a ruler in the snapshot`;
+      }
+
+      if (!Array.isArray(a.claimants)) return 'claimants must be an array of character ids, possibly empty';
+      if (a.claimants.length > MAX_CLAIMANTS) {
+        return `at most ${MAX_CLAIMANTS} claimants; ${a.claimants.length} were named`;
+      }
+      const claimants = a.claimants.map(safeInt);
+      for (const c of claimants) {
+        if (c === null || !state.realmsById.has(c)) return `claimant ${c} is not a ruler in the snapshot`;
+        if (c === caliph) return 'the collapsing ruler cannot also be one of the claimants to their own realm';
+      }
+      if (new Set(claimants).size !== claimants.length) return 'the same claimant is named twice';
+
+      // The date. Outside the window this is some other power coming apart, and
+      // the modifiers and prose would be describing the wrong century.
+      if (!inCollapseWindow(state.year)) {
+        return `the Almohad collapse belongs to ${COLLAPSE_YEAR} give or take ${COLLAPSE_SPAN} years, and the campaign is at ${state.year}`;
+      }
+
+      // The place. Everyone named has to belong to the peninsula, on the same
+      // reasoning iberian_pressure uses.
+      const named = [caliph, ...claimants];
+      const geography = hasRegionData(state);
+      const outsiders = named
+        .map((id) => state.realmsById.get(id))
+        .filter((r) => !isIberian(r, geography));
+      if (outsiders.length) {
+        const names = outsiders.map((r) => (geography
+          ? `${r.primaryTitle || r.ruler} (holds no land in Iberia)`
+          : `${r.primaryTitle || r.ruler} (${r.culture || 'unknown culture'})`));
+        return `this is an Iberian event and ${names.join(', ')} ${outsiders.length > 1 ? 'are' : 'is'} not of the peninsula`;
+      }
+
+      // The collapsing party has to be the one plausibly collapsing. Staged
+      // against a Christian crown this would be the Director inventing a
+      // different history entirely, and culture is the only handle the snapshot
+      // offers on which side of that line a realm sits.
+      const subject = state.realmsById.get(caliph);
+      if (!COLLAPSING_CULTURES.test(subject?.culture ?? '')) {
+        return `almohad_collapse describes an Andalusian or Maghrebi power coming apart, and ${subject?.primaryTitle || subject?.ruler} is ${subject?.culture || 'of an unknown culture'}`;
+      }
+
+      const locality = requireLocality(state, named, 'almohad_collapse');
+      if (locality) return locality;
+
+      // The band. A severity the peninsula will not carry is refused, and the
+      // refusal reports the counties it counted.
+      const key = String(a.severity ?? '');
+      if (!SEVERITY_KEYS.includes(key)) {
+        return `severity "${a.severity}" is not one of ${SEVERITY_KEYS.join(', ')}`;
+      }
+      const band = collapseBand(state, baseline);
+      if (band.allowed.length === 0) {
+        return `no Almohad collapse of any severity fits this world: ${band.reason}`;
+      }
+      if (!band.allowed.includes(key)) {
+        return `"${key}" is out of band here - ${band.reason}; the severities this world supports are ${band.allowed.join(', ')}`;
+      }
+      return null;
+    },
+
+    preview(a, state, baseline) {
+      const caliph = state.realmsById.get(safeInt(a.caliph));
+      const claimants = (a.claimants ?? [])
+        .map(safeInt)
+        .map((id) => state.realmsById.get(id))
+        .filter(Boolean);
+      const tier = SEVERITY[String(a.severity ?? '')] ?? null;
+      const band = collapseBand(state, baseline);
+
+      const who = `${caliph?.ruler ?? a.caliph}${caliph?.primaryTitle ? ` of ${caliph.primaryTitle}` : ''}`;
+      const takers = claimants.length
+        ? claimants.map((r) => r.ruler || r.primaryTitle).join(', ')
+        : 'nobody in particular';
+
+      // Itemised, like iberian_pressure and for the same reason: this touches
+      // more realms than any other action in the toolkit and a one-line summary
+      // would be the least honest thing in the sidebar rather than the tidiest.
+      const effects = tier ? tier.effects.map((e) => `  - ${e}`).join('\n') : '  - (unknown severity)';
+
+      return `Stage the collapse of ${who} at ${tier?.label ?? 'unknown'} severity, with ${takers} placed to take the ground.\n`
+        + `This grants:\n${effects}\n`
+        + 'The defection roll is the one thing here a ruler does not choose; the game still refuses any vassal it would not '
+        + 'normally let raise a faction, and what they raise is a faction rather than a country.\n'
+        + 'No title changes hands and no war begins.\n'
+        + `Severity band for this world: ${band.allowed.join(', ') || 'none'} - ${band.reason}.`
+        + distanceNote(state, [safeInt(a.caliph), ...(a.claimants ?? []).map(safeInt)]);
+    },
+
+    toScript: (a, token, state) => almohadCollapseScript({
+      caliphTag: tagOf(state, safeInt(a.caliph)),
+      claimantTags: (a.claimants ?? []).map((c) => tagOf(state, safeInt(c))).filter((t) => t !== null),
+      severity: String(a.severity ?? ''),
+    }, token),
+  },
+
+  /**
+   * A war the record names, started outright.
+   *
+   * The only action in the toolkit that starts a war, and the reason is in
+   * director/historicalWars.js: some history is an event rather than a
+   * pressure, and a claim is a licence the AI may use a decade early. The
+   * model picks the war; the table supplies everything else, and the parties
+   * are whoever holds its titles on the live map.
+   */
+  historical_war: {
+    signature: 'historical_war',
+    description:
+      'Start a war the historical record names, near the date it names, under its own casus belli and its historical name. '
+      + 'Unlike every other action this one does start a war: the game fights it, and temporary modifiers tilt it toward the outcome the record gives without deciding it. '
+      + "The attacker also gains a pressed claim, which is the war's justification and the fallback if the game refuses to start it. "
+      + 'You choose which war and nothing else; the parties are whoever holds the named titles on the live map. '
+      + 'A war is refused outside its window, when its attacker is not free to declare war, and when its target land is already the attacker\'s.',
+    parameters: {
+      type: 'object',
+      properties: {
+        war: {
+          type: 'string',
+          enum: WAR_KEYS,
+          description: WAR_KEYS.map((k) => `${k}: ${WARS[k].warName}, ${WARS[k].year} (a ${WARS[k].kind})`).join(' | '),
+        },
+      },
+      required: ['war'],
+      additionalProperties: false,
+    },
+
+    validate(a, state) {
+      // First, as every mod-content action checks it first: without the casus
+      // belli the war is refused in game and the player gets a claim instead,
+      // silently, every time.
+      const mod = warSupport();
+      if (!mod.ok) return `historical_war cannot be executed: ${mod.reason}`;
+
+      const key = String(a.war ?? '');
+      if (!isWar(key)) {
+        return `"${safeString(a.war, 40)}" is not a curated war; the ones that are offered are ${WAR_KEYS.join(', ')}`;
+      }
+
+      // This war, not just wars at all: a mod may carry one casus belli and
+      // not the next, and the missing one fails as a silent claim.
+      const modErr = warModError(key);
+      if (modErr) return modErr;
+
+      const date = warWindowError(key, state.year);
+      if (date) return date;
+
+      const p = warParties(state, key);
+      if (p.error) return p.error;
+
+      // Already fighting each other: start_war would be refused, and the
+      // modifiers would land on both sides of a war already under way.
+      const ongoing = state.warBetween?.(p.attacker, p.defender);
+      if (ongoing) {
+        return `${WARS[key].label} cannot begin: these two are already at war${ongoing.name ? ` (${ongoing.name})` : ''}, and the modifiers would land mid-campaign on a fight the record did not describe`;
+      }
+
+      return requireLocality(state, [p.attacker, p.defender], 'historical_war');
+    },
+
+    preview(a, state) {
+      const key = String(a.war ?? '');
+      const p = warParties(state, key);
+      return warPreview(key, state) + (p.error ? '' : distanceNote(state, [p.attacker, p.defender]));
+    },
+
+    toScript: (a, token) => warScript(String(a.war ?? ''), token),
+  },
+
+  /**
    * A named turning point from the record, staged around two realms.
    *
    * The generic half of the macro-event library: everything specific to a given
@@ -1030,6 +1269,38 @@ export function validateProposal(proposed, state, baseline) {
 
   for (const req of action.parameters.required) {
     if (args[req] === undefined) return { ok: false, error: `missing required parameter "${req}"` };
+  }
+
+  // The tier cap. A pressed claim is on the target's primary title, so a claim
+  // on an emperor is a claim on the empire - and winning it hands over the
+  // empire and everything under it, not the land the claim was meant for. A
+  // live 1217 card did exactly this: Castile aimed at the Mu'minid Empire's own
+  // title to get at the Almohads' last three holdings in Iberia, which on
+  // victory would have made it Almohad emperor, Morocco included. The moment
+  // library already caps its claims at kingdom tier; grant_claim and
+  // spawn_character's claim could reach past it, and now cannot. Checked ahead
+  // of each action's own validation because no other reason matters more.
+  const claimOn = proposed.action === 'grant_claim' ? args.target
+    : proposed.action === 'spawn_character' && given(args.claim) ? args.claim
+      : undefined;
+  if (given(claimOn)) {
+    const target = state?.realmsById?.get(safeInt(claimOn));
+    if (target?.tierKey === 'empire') {
+      return {
+        ok: false,
+        error: `a claim on ${target.primaryTitle ?? "this ruler's primary title"} is a claim on an empire-tier title, which on victory hands over the whole empire rather than the land the claim is meant for. Aim it at whoever holds that land directly - a kingdom or duchy within the empire - or, where the record names the war, propose it with historical_war`,
+      };
+    }
+  }
+
+  // A claim that would pre-empt a curated war is redirected to the war, ahead
+  // of grant_claim's own checks because it is the most relevant reason there
+  // is. This is the guard for the card that started the historical war
+  // library: Aragon handed a claim on the Balearics in 1217, twelve years
+  // before the record's war, with thirty years of appetite to use it early.
+  if (proposed.action === 'grant_claim') {
+    const conflict = curatedWarConflict(state, safeInt(args.actor), safeInt(args.target), state?.year);
+    if (conflict) return { ok: false, error: conflict };
   }
 
   const err = action.validate(args, state, baseline);

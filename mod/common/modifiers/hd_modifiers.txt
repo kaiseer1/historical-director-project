@@ -126,3 +126,150 @@ hd_moment_decline = {
 	levy_size = 0.15
 	monthly_piety = 1
 }
+
+# --- The Almohad collapse --------------------------------------------------
+#
+# Applied by the almohad_collapse macro action; see
+# src/director/almohadCollapse.js for the severity table these mirror.
+#
+# The historical shape, briefly. Las Navas de Tolosa in 1212 did not destroy
+# the Almohad state, it destroyed its authority in the peninsula. What followed
+# was not conquest from outside but disintegration from within: Ibn Hud rose in
+# Murcia in 1228, Ibn al-Ahmar founded the Nasrid emirate at Granada in 1238,
+# and the third taifas emerged from provinces whose governors simply stopped
+# obeying. The Christian crowns then took the pieces - Cordoba 1236, Valencia
+# 1238, Seville 1248 - against opponents who were no longer one opponent.
+#
+# So the modelling puts the weight on *vassals leaving*, not on armies losing.
+# `vassal_opinion` is the lever that does that, because vanilla's independence
+# faction reads liege opinion directly: 00_factions.txt scores joining with
+# OPINION_MULTIPLIER = -0.4 against a base reluctance of -150, so every point
+# of vassal opinion lost here is 0.4 of a point toward a faction the caliph did
+# not have yesterday. The military terms are secondary and deliberately mild -
+# a caliph who cannot hold his emirs is the historical fact; a caliph who
+# cannot win a battle is a different and smaller claim.
+#
+# Every key below appears in a vanilla modifier definition; none is assumed.
+# vassal_opinion (111 uses), levy_size (152), monthly_income_mult (42),
+# men_at_arms_maintenance (49), short_reign_duration_mult (16),
+# monthly_prestige (275), advantage (64), garrison_size (67),
+# knight_effectiveness_mult (48), ai_war_chance (17).
+#
+# Durations are set by the action rather than here, and run 20-30 years: the
+# collapse took from 1212 to 1248, and a modifier that expires in ten would be
+# describing a bad decade rather than the end of a caliphate.
+
+# The authority slipping. Emirs are restive, the treasury is thinner, but the
+# state still stands and could still recover.
+hd_almohad_fraying = {
+	icon = martial_negative
+	vassal_opinion = -15
+	levy_size = -0.10
+	monthly_income_mult = -0.10
+	short_reign_duration_mult = 0.25
+}
+
+# The historical 1220s. Provinces are being lost to their own governors rather
+# than to invaders, and holding the army together now costs more than it earns.
+hd_almohad_breaking = {
+	icon = martial_negative
+	vassal_opinion = -30
+	levy_size = -0.20
+	monthly_income_mult = -0.20
+	men_at_arms_maintenance = 0.25
+	short_reign_duration_mult = 0.50
+	monthly_prestige = -1
+	advantage = -2
+}
+
+# The third taifas. What is left is a claim to a title rather than a state, and
+# the garrisons are the last thing still answering.
+hd_almohad_shattered = {
+	icon = martial_negative
+	vassal_opinion = -45
+	levy_size = -0.30
+	monthly_income_mult = -0.30
+	men_at_arms_maintenance = 0.50
+	short_reign_duration_mult = 0.75
+	monthly_prestige = -2
+	advantage = -3
+	garrison_size = -0.20
+}
+
+# --- Those taking the ground -----------------------------------------------
+#
+# Applied to the claimants named in the same proposal, Christian crown or
+# breakaway emirate alike - the record allows both, and 1228-1248 had both.
+#
+# Deliberately modest next to the collapse modifiers above. The Director's line
+# throughout is that it sets the stage and the ruler decides: a claimant who is
+# handed a decisive military edge is not deciding anything. What this grants is
+# the confidence to move on a neighbour who is visibly coming apart, which is
+# what actually happened, and not the means to win the war that follows.
+hd_taifa_ascendant = {
+	icon = martial_positive
+	ai_war_chance = 20
+	monthly_prestige = 1
+	advantage = 2
+	knight_effectiveness_mult = 0.10
+}
+
+# Granted to a vassal who breaks away in the collapse - the Ibn Hud modifier,
+# in effect. Small, and short: a new emirate's advantage was that nobody could
+# spare the strength to reconquer it, not that it was strong.
+hd_taifa_risen = {
+	icon = county_modifier_opinion_positive
+	monthly_prestige = 0.5
+	garrison_size = 0.15
+	levy_size = 0.10
+}
+
+# --- Historical wars --------------------------------------------------------
+#
+# Applied by the historical_war action (src/director/historicalWars.js) when a
+# curated war starts. The war is real and CK3 fights it; these tilt it toward
+# the outcome the record gives, and expire on their own. By kind rather than by
+# war, so the next curated crusade needs a table entry, not a new modifier.
+#
+# Cheap by construction: a timed modifier is a few numbers on one character,
+# read when stats are computed and gone when it expires. Paradox's own scripted
+# historical war (the Raiktor bookmark) tilts its war with spawn_army, which
+# puts real units on the map; this is lighter than that.
+#
+# Every key already appears in a vanilla modifier definition.
+
+# The attacker in a war the record calls a crusade: the indulgences, the fleet
+# that could be paid for, the nobles who came because the Pope said so.
+# ai_war_chance matters only if start_war was refused and the claim is left to
+# be pressed the ordinary way - during the war itself it does nothing.
+hd_crusade_zeal = {
+	icon = martial_positive
+	advantage = 5
+	levy_size = 0.20
+	knight_effectiveness_mult = 0.15
+	monthly_piety = 1
+	ai_war_chance = 30
+}
+
+# The defender of ground the record says was lost: isolated, unsupported, and
+# holding it for a power that could not come to its aid.
+hd_beleaguered_realm = {
+	icon = martial_negative
+	levy_size = -0.20
+	garrison_size = -0.25
+	advantage = -2
+}
+
+# The attacker in a reconquest: a king with the Church's blessing and the
+# frontier's appetite, closing on a city whose masters can no longer relieve it.
+# Prestige rather than piety - these were a crown's wars - and a little milder
+# than the crusade's, because the record's reconquest campaigns were sieges
+# ground out over months rather than a single blow.
+hd_reconquest_resolve = {
+	icon = martial_positive
+	advantage = 4
+	levy_size = 0.15
+	knight_effectiveness_mult = 0.10
+	monthly_prestige = 1
+	ai_war_chance = 30
+}

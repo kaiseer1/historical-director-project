@@ -1,0 +1,837 @@
+﻿# Historical Director - historical wars.
+#
+# One casus belli per curated war, because a war's name lives in its CB and a
+# historical war has exactly one name. See src/director/historicalWars.js for
+# the table these belong to.
+#
+# Modelled line for line on vanilla's raiktor_claim_cb, in
+# common/casus_belli_types/00_event_war.txt - Paradox's own script-only
+# historical war, started from bookmark_events.txt with start_war and then
+# tilted with spawn_army. group = event and valid_to_start = { always = no }
+# mean neither the player nor the AI can ever declare it. The only way it
+# starts is the Director's start_war, after the player has approved.
+#
+# It fights over a claim, as raiktor's does - target_titles = claim - and that
+# is deliberate twice over. The claim is the war's justification in the game's
+# own terms, and it is the fallback: if start_war is refused, the pressed claim
+# stays, and the AI can press it through ordinary means.
+#
+# The target is d_mallorca, not the kingdom sitting on top of it. In a live
+# 1217 campaign the Balearics were held as a "Kingdom of Mallorca" that no
+# landed_titles file defines - a title created in play, whose key cannot be
+# known in advance. d_mallorca, c_mallorca and c_menorca are identical in
+# vanilla and in all three installed mods that touch the Balearics, so the war
+# is over the land rather than over whatever crown happens to sit on it.
+
+hd_conquest_of_majorca_cb = {
+	icon = minor_religious_war
+	group = event
+
+	should_show_war_goal_subview = yes
+	mutually_exclusive_titles = { always = yes }
+	allow_hostages = no
+
+	allowed_for_character = {}
+	allowed_for_character_display_regardless = {}
+	allowed_against_character = {}
+	target_titles = claim
+	target_title_tier = all
+	target_de_jure_regions_above = yes
+	ignore_effect = change_title_holder
+
+	valid_to_start = { always = no }
+
+	should_invalidate = {}
+	on_invalidated_desc = msg_invasion_war_invalidated_message
+
+	cost = {}
+
+	on_declaration = { on_declared_war = yes }
+
+	on_victory_desc = {
+		first_valid = {
+			triggered_desc = {
+				trigger = { scope:claimant = { is_local_player = yes } }
+				desc = claim_cb_victory_desc_attacker_claimant
+			}
+			triggered_desc = {
+				trigger = { scope:attacker = { is_local_player = yes } }
+				desc = claim_cb_victory_desc_attacker
+			}
+			desc = claim_cb_victory_desc
+		}
+	}
+
+	# The Balearics pass: d_mallorca itself if it is uncreated or held by the
+	# defender's side, and every county under it that the defender's side holds.
+	# Raiktor's Epirus transfer, with the title changed and nothing else.
+	on_victory = {
+		scope:attacker = { show_pow_release_message_effect = yes }
+
+		hidden_effect = {
+			title:d_mallorca = {
+				every_in_de_jure_hierarchy = {
+					limit = {
+						tier >= tier_county
+						holder ?= {
+							OR = {
+								this = scope:defender
+								is_vassal_or_below_of = scope:defender
+							}
+						}
+					}
+					add_to_list = hd_majorca_titles
+				}
+			}
+
+			create_title_and_vassal_change = {
+				type = conquest
+				save_scope_as = hd_majorca_change
+				add_claim_on_loss = yes
+			}
+
+			title:d_mallorca = {
+				if = {
+					limit = {
+						OR = {
+							is_title_created = no
+							holder = {
+								OR = {
+									this = scope:defender
+									any_liege_or_above = { this = scope:defender }
+								}
+							}
+						}
+					}
+					change_title_holder = {
+						holder = scope:attacker
+						change = scope:hd_majorca_change
+					}
+				}
+			}
+
+			every_in_list = {
+				list = hd_majorca_titles
+				change_title_holder = {
+					holder = scope:attacker
+					change = scope:hd_majorca_change
+				}
+			}
+
+			resolve_title_and_vassal_change = scope:hd_majorca_change
+		}
+
+		# Paid as a religious war, which is what makes a crusade's victory pay
+		# in piety as well as prestige. azariqa_rebellion_cb does the same.
+		modify_all_participants_fame_values = {
+			WINNER = scope:attacker
+			LOSER = scope:defender
+			FAME_BASE = major_prestige_value
+			IS_RELIGIOUS_WAR = yes
+			WINNER_FAME_SCALE = 10
+			LOSER_FAME_SCALE = -10
+			WINNER_ALLY_FAME_SCALE = 10
+			LOSER_ALLY_FAME_SCALE = 10
+		}
+
+		add_truce_attacker_victory_effect = yes
+	}
+
+	on_white_peace_desc = {
+		first_valid = {
+			triggered_desc = {
+				trigger = { scope:defender = { is_local_player = yes } }
+				desc = claim_cb_white_peace_desc_defender
+			}
+			desc = claim_cb_white_peace_desc
+		}
+	}
+
+	# The claim survives a white peace, as vanilla's does. The record does not
+	# have a draw here, but a campaign may, and a crown that fought to a
+	# standstill still thinks the island is owed to it.
+	on_white_peace = {
+		scope:attacker = { show_pow_release_message_effect = yes }
+		add_truce_white_peace_effect = yes
+	}
+
+	on_defeat_desc = {
+		first_valid = {
+			triggered_desc = {
+				trigger = { scope:defender = { is_local_player = yes } }
+				desc = claim_cb_defeat_desc_defender
+			}
+			triggered_desc = {
+				trigger = { scope:attacker = { is_local_player = yes } }
+				desc = claim_cb_defeat_desc_attacker
+			}
+			desc = claim_cb_defeat_desc
+		}
+	}
+
+	# A lost crusade loses the claim and pays for itself, as a lost claim war
+	# does in vanilla. The Director tilted the war; it does not undo the result.
+	on_defeat = {
+		scope:attacker = { show_pow_release_message_effect = yes }
+
+		every_in_list = {
+			list = target_titles
+			scope:claimant = { remove_claim = prev }
+		}
+
+		scope:attacker = {
+			pay_short_term_gold_reparations_effect = {
+				GOLD_VALUE = 3
+			}
+		}
+
+		modify_all_participants_fame_values = {
+			WINNER = scope:defender
+			LOSER = scope:attacker
+			FAME_BASE = major_prestige_value
+			IS_RELIGIOUS_WAR = yes
+			WINNER_FAME_SCALE = scale_10_war_defender_win
+			LOSER_FAME_SCALE = -10
+			WINNER_ALLY_FAME_SCALE = 10
+			LOSER_ALLY_FAME_SCALE = 10
+		}
+
+		add_truce_attacker_defeat_effect = yes
+	}
+
+	transfer_behavior = transfer
+
+	on_primary_attacker_death = inherit
+	on_primary_defender_death = inherit
+
+	attacker_allies_inherit = yes
+	defender_allies_inherit = yes
+
+	war_name = "hd_conquest_of_majorca_war_name"
+	my_war_name = "hd_conquest_of_majorca_war_name_my"
+	war_name_base = "hd_conquest_of_majorca_war_name_base"
+	cb_name = "hd_conquest_of_majorca_cb_name"
+
+	interface_priority = 100
+
+	attacker_wargoal_percentage = 0.8
+
+	max_defender_score_from_occupation = 150
+	max_attacker_score_from_occupation = 150
+}
+
+# --- Castile's reconquest wars ----------------------------------------------
+#
+# The same casus belli as the Conquest of Majorca's, derived from it rather than
+# rewritten, so the three cannot drift apart mechanically: only the key, the
+# duchy fought over and the localisation differ.
+#
+# Over the duchy, not the kingdom, and deliberately. d_cordoba and d_sevilla both
+# sit de jure under k_andalusia, and a war over the kingdom would hand Castile
+# all of al-Andalus in one peace - the exact mistake a live Director card made in
+# 1217, reaching for the Mu'minid Empire's own title to get at its last holdings
+# in Iberia. The record took Andalusia a city at a time, and so does this. All
+# four keys are identical in vanilla and in the three installed mods that touch
+# Iberian titles.
+
+hd_conquest_of_cordoba_cb = {
+	icon = minor_religious_war
+	group = event
+
+	should_show_war_goal_subview = yes
+	mutually_exclusive_titles = { always = yes }
+	allow_hostages = no
+
+	allowed_for_character = {}
+	allowed_for_character_display_regardless = {}
+	allowed_against_character = {}
+	target_titles = claim
+	target_title_tier = all
+	target_de_jure_regions_above = yes
+	ignore_effect = change_title_holder
+
+	valid_to_start = { always = no }
+
+	should_invalidate = {}
+	on_invalidated_desc = msg_invasion_war_invalidated_message
+
+	cost = {}
+
+	on_declaration = { on_declared_war = yes }
+
+	on_victory_desc = {
+		first_valid = {
+			triggered_desc = {
+				trigger = { scope:claimant = { is_local_player = yes } }
+				desc = claim_cb_victory_desc_attacker_claimant
+			}
+			triggered_desc = {
+				trigger = { scope:attacker = { is_local_player = yes } }
+				desc = claim_cb_victory_desc_attacker
+			}
+			desc = claim_cb_victory_desc
+		}
+	}
+
+	# The land passes: d_cordoba itself if it is uncreated or held by the
+	# defender's side, and every county under it that the defender's side holds.
+	# Raiktor's Epirus transfer, with the title changed and nothing else.
+	on_victory = {
+		scope:attacker = { show_pow_release_message_effect = yes }
+
+		hidden_effect = {
+			title:d_cordoba = {
+				every_in_de_jure_hierarchy = {
+					limit = {
+						tier >= tier_county
+						holder ?= {
+							OR = {
+								this = scope:defender
+								is_vassal_or_below_of = scope:defender
+							}
+						}
+					}
+					add_to_list = hd_cordoba_titles
+				}
+			}
+
+			create_title_and_vassal_change = {
+				type = conquest
+				save_scope_as = hd_cordoba_change
+				add_claim_on_loss = yes
+			}
+
+			title:d_cordoba = {
+				if = {
+					limit = {
+						OR = {
+							is_title_created = no
+							holder = {
+								OR = {
+									this = scope:defender
+									any_liege_or_above = { this = scope:defender }
+								}
+							}
+						}
+					}
+					change_title_holder = {
+						holder = scope:attacker
+						change = scope:hd_cordoba_change
+					}
+				}
+			}
+
+			every_in_list = {
+				list = hd_cordoba_titles
+				change_title_holder = {
+					holder = scope:attacker
+					change = scope:hd_cordoba_change
+				}
+			}
+
+			resolve_title_and_vassal_change = scope:hd_cordoba_change
+		}
+
+		# Paid as a religious war, which is what makes this war's victory pay
+		# in piety as well as prestige. azariqa_rebellion_cb does the same.
+		modify_all_participants_fame_values = {
+			WINNER = scope:attacker
+			LOSER = scope:defender
+			FAME_BASE = major_prestige_value
+			IS_RELIGIOUS_WAR = yes
+			WINNER_FAME_SCALE = 10
+			LOSER_FAME_SCALE = -10
+			WINNER_ALLY_FAME_SCALE = 10
+			LOSER_ALLY_FAME_SCALE = 10
+		}
+
+		add_truce_attacker_victory_effect = yes
+	}
+
+	on_white_peace_desc = {
+		first_valid = {
+			triggered_desc = {
+				trigger = { scope:defender = { is_local_player = yes } }
+				desc = claim_cb_white_peace_desc_defender
+			}
+			desc = claim_cb_white_peace_desc
+		}
+	}
+
+	# The claim survives a white peace, as vanilla's does. The record does not
+	# have a draw here, but a campaign may, and a crown that fought to a
+	# standstill still thinks the land is owed to it.
+	on_white_peace = {
+		scope:attacker = { show_pow_release_message_effect = yes }
+		add_truce_white_peace_effect = yes
+	}
+
+	on_defeat_desc = {
+		first_valid = {
+			triggered_desc = {
+				trigger = { scope:defender = { is_local_player = yes } }
+				desc = claim_cb_defeat_desc_defender
+			}
+			triggered_desc = {
+				trigger = { scope:attacker = { is_local_player = yes } }
+				desc = claim_cb_defeat_desc_attacker
+			}
+			desc = claim_cb_defeat_desc
+		}
+	}
+
+	# A lost war loses the claim and pays for itself, as a lost claim war
+	# does in vanilla. The Director tilted the war; it does not undo the result.
+	on_defeat = {
+		scope:attacker = { show_pow_release_message_effect = yes }
+
+		every_in_list = {
+			list = target_titles
+			scope:claimant = { remove_claim = prev }
+		}
+
+		scope:attacker = {
+			pay_short_term_gold_reparations_effect = {
+				GOLD_VALUE = 3
+			}
+		}
+
+		modify_all_participants_fame_values = {
+			WINNER = scope:defender
+			LOSER = scope:attacker
+			FAME_BASE = major_prestige_value
+			IS_RELIGIOUS_WAR = yes
+			WINNER_FAME_SCALE = scale_10_war_defender_win
+			LOSER_FAME_SCALE = -10
+			WINNER_ALLY_FAME_SCALE = 10
+			LOSER_ALLY_FAME_SCALE = 10
+		}
+
+		add_truce_attacker_defeat_effect = yes
+	}
+
+	transfer_behavior = transfer
+
+	on_primary_attacker_death = inherit
+	on_primary_defender_death = inherit
+
+	attacker_allies_inherit = yes
+	defender_allies_inherit = yes
+
+	war_name = "hd_conquest_of_cordoba_war_name"
+	my_war_name = "hd_conquest_of_cordoba_war_name_my"
+	war_name_base = "hd_conquest_of_cordoba_war_name_base"
+	cb_name = "hd_conquest_of_cordoba_cb_name"
+
+	interface_priority = 100
+
+	attacker_wargoal_percentage = 0.8
+
+	max_defender_score_from_occupation = 150
+	max_attacker_score_from_occupation = 150
+}
+
+hd_conquest_of_seville_cb = {
+	icon = minor_religious_war
+	group = event
+
+	should_show_war_goal_subview = yes
+	mutually_exclusive_titles = { always = yes }
+	allow_hostages = no
+
+	allowed_for_character = {}
+	allowed_for_character_display_regardless = {}
+	allowed_against_character = {}
+	target_titles = claim
+	target_title_tier = all
+	target_de_jure_regions_above = yes
+	ignore_effect = change_title_holder
+
+	valid_to_start = { always = no }
+
+	should_invalidate = {}
+	on_invalidated_desc = msg_invasion_war_invalidated_message
+
+	cost = {}
+
+	on_declaration = { on_declared_war = yes }
+
+	on_victory_desc = {
+		first_valid = {
+			triggered_desc = {
+				trigger = { scope:claimant = { is_local_player = yes } }
+				desc = claim_cb_victory_desc_attacker_claimant
+			}
+			triggered_desc = {
+				trigger = { scope:attacker = { is_local_player = yes } }
+				desc = claim_cb_victory_desc_attacker
+			}
+			desc = claim_cb_victory_desc
+		}
+	}
+
+	# The land passes: d_sevilla itself if it is uncreated or held by the
+	# defender's side, and every county under it that the defender's side holds.
+	# Raiktor's Epirus transfer, with the title changed and nothing else.
+	on_victory = {
+		scope:attacker = { show_pow_release_message_effect = yes }
+
+		hidden_effect = {
+			title:d_sevilla = {
+				every_in_de_jure_hierarchy = {
+					limit = {
+						tier >= tier_county
+						holder ?= {
+							OR = {
+								this = scope:defender
+								is_vassal_or_below_of = scope:defender
+							}
+						}
+					}
+					add_to_list = hd_seville_titles
+				}
+			}
+
+			create_title_and_vassal_change = {
+				type = conquest
+				save_scope_as = hd_seville_change
+				add_claim_on_loss = yes
+			}
+
+			title:d_sevilla = {
+				if = {
+					limit = {
+						OR = {
+							is_title_created = no
+							holder = {
+								OR = {
+									this = scope:defender
+									any_liege_or_above = { this = scope:defender }
+								}
+							}
+						}
+					}
+					change_title_holder = {
+						holder = scope:attacker
+						change = scope:hd_seville_change
+					}
+				}
+			}
+
+			every_in_list = {
+				list = hd_seville_titles
+				change_title_holder = {
+					holder = scope:attacker
+					change = scope:hd_seville_change
+				}
+			}
+
+			resolve_title_and_vassal_change = scope:hd_seville_change
+		}
+
+		# Paid as a religious war, which is what makes this war's victory pay
+		# in piety as well as prestige. azariqa_rebellion_cb does the same.
+		modify_all_participants_fame_values = {
+			WINNER = scope:attacker
+			LOSER = scope:defender
+			FAME_BASE = major_prestige_value
+			IS_RELIGIOUS_WAR = yes
+			WINNER_FAME_SCALE = 10
+			LOSER_FAME_SCALE = -10
+			WINNER_ALLY_FAME_SCALE = 10
+			LOSER_ALLY_FAME_SCALE = 10
+		}
+
+		add_truce_attacker_victory_effect = yes
+	}
+
+	on_white_peace_desc = {
+		first_valid = {
+			triggered_desc = {
+				trigger = { scope:defender = { is_local_player = yes } }
+				desc = claim_cb_white_peace_desc_defender
+			}
+			desc = claim_cb_white_peace_desc
+		}
+	}
+
+	# The claim survives a white peace, as vanilla's does. The record does not
+	# have a draw here, but a campaign may, and a crown that fought to a
+	# standstill still thinks the land is owed to it.
+	on_white_peace = {
+		scope:attacker = { show_pow_release_message_effect = yes }
+		add_truce_white_peace_effect = yes
+	}
+
+	on_defeat_desc = {
+		first_valid = {
+			triggered_desc = {
+				trigger = { scope:defender = { is_local_player = yes } }
+				desc = claim_cb_defeat_desc_defender
+			}
+			triggered_desc = {
+				trigger = { scope:attacker = { is_local_player = yes } }
+				desc = claim_cb_defeat_desc_attacker
+			}
+			desc = claim_cb_defeat_desc
+		}
+	}
+
+	# A lost war loses the claim and pays for itself, as a lost claim war
+	# does in vanilla. The Director tilted the war; it does not undo the result.
+	on_defeat = {
+		scope:attacker = { show_pow_release_message_effect = yes }
+
+		every_in_list = {
+			list = target_titles
+			scope:claimant = { remove_claim = prev }
+		}
+
+		scope:attacker = {
+			pay_short_term_gold_reparations_effect = {
+				GOLD_VALUE = 3
+			}
+		}
+
+		modify_all_participants_fame_values = {
+			WINNER = scope:defender
+			LOSER = scope:attacker
+			FAME_BASE = major_prestige_value
+			IS_RELIGIOUS_WAR = yes
+			WINNER_FAME_SCALE = scale_10_war_defender_win
+			LOSER_FAME_SCALE = -10
+			WINNER_ALLY_FAME_SCALE = 10
+			LOSER_ALLY_FAME_SCALE = 10
+		}
+
+		add_truce_attacker_defeat_effect = yes
+	}
+
+	transfer_behavior = transfer
+
+	on_primary_attacker_death = inherit
+	on_primary_defender_death = inherit
+
+	attacker_allies_inherit = yes
+	defender_allies_inherit = yes
+
+	war_name = "hd_conquest_of_seville_war_name"
+	my_war_name = "hd_conquest_of_seville_war_name_my"
+	war_name_base = "hd_conquest_of_seville_war_name_base"
+	cb_name = "hd_conquest_of_seville_cb_name"
+
+	interface_priority = 100
+
+	attacker_wargoal_percentage = 0.8
+
+	max_defender_score_from_occupation = 150
+	max_attacker_score_from_occupation = 150
+}
+
+# --- Beyond Iberia: the Albigensian Crusade -------------------------------------
+#
+# The same casus belli again, derived from Majorca's, and the first curated war
+# outside the peninsula - here to show the machinery was never Iberian. Like
+# Majorca's it is a crusade, so its crusade wording is kept.
+#
+# Over d_toulouse, not k_aquitaine above it: the crusade brought the county of
+# Toulouse and the Midi under the crown, not all of Aquitaine. k_france,
+# d_toulouse and c_toulouse are identical in vanilla and in the two installed
+# mods that define them; the third mod touching titles leaves them alone.
+
+hd_albigensian_crusade_cb = {
+	icon = minor_religious_war
+	group = event
+
+	should_show_war_goal_subview = yes
+	mutually_exclusive_titles = { always = yes }
+	allow_hostages = no
+
+	allowed_for_character = {}
+	allowed_for_character_display_regardless = {}
+	allowed_against_character = {}
+	target_titles = claim
+	target_title_tier = all
+	target_de_jure_regions_above = yes
+	ignore_effect = change_title_holder
+
+	valid_to_start = { always = no }
+
+	should_invalidate = {}
+	on_invalidated_desc = msg_invasion_war_invalidated_message
+
+	cost = {}
+
+	on_declaration = { on_declared_war = yes }
+
+	on_victory_desc = {
+		first_valid = {
+			triggered_desc = {
+				trigger = { scope:claimant = { is_local_player = yes } }
+				desc = claim_cb_victory_desc_attacker_claimant
+			}
+			triggered_desc = {
+				trigger = { scope:attacker = { is_local_player = yes } }
+				desc = claim_cb_victory_desc_attacker
+			}
+			desc = claim_cb_victory_desc
+		}
+	}
+
+	# Languedoc passes: d_toulouse itself if it is uncreated or held by the
+	# defender's side, and every county under it that the defender's side holds.
+	# Raiktor's Epirus transfer, with the title changed and nothing else.
+	on_victory = {
+		scope:attacker = { show_pow_release_message_effect = yes }
+
+		hidden_effect = {
+			title:d_toulouse = {
+				every_in_de_jure_hierarchy = {
+					limit = {
+						tier >= tier_county
+						holder ?= {
+							OR = {
+								this = scope:defender
+								is_vassal_or_below_of = scope:defender
+							}
+						}
+					}
+					add_to_list = hd_toulouse_titles
+				}
+			}
+
+			create_title_and_vassal_change = {
+				type = conquest
+				save_scope_as = hd_toulouse_change
+				add_claim_on_loss = yes
+			}
+
+			title:d_toulouse = {
+				if = {
+					limit = {
+						OR = {
+							is_title_created = no
+							holder = {
+								OR = {
+									this = scope:defender
+									any_liege_or_above = { this = scope:defender }
+								}
+							}
+						}
+					}
+					change_title_holder = {
+						holder = scope:attacker
+						change = scope:hd_toulouse_change
+					}
+				}
+			}
+
+			every_in_list = {
+				list = hd_toulouse_titles
+				change_title_holder = {
+					holder = scope:attacker
+					change = scope:hd_toulouse_change
+				}
+			}
+
+			resolve_title_and_vassal_change = scope:hd_toulouse_change
+		}
+
+		# Paid as a religious war, which is what makes a crusade's victory pay
+		# in piety as well as prestige. azariqa_rebellion_cb does the same.
+		modify_all_participants_fame_values = {
+			WINNER = scope:attacker
+			LOSER = scope:defender
+			FAME_BASE = major_prestige_value
+			IS_RELIGIOUS_WAR = yes
+			WINNER_FAME_SCALE = 10
+			LOSER_FAME_SCALE = -10
+			WINNER_ALLY_FAME_SCALE = 10
+			LOSER_ALLY_FAME_SCALE = 10
+		}
+
+		add_truce_attacker_victory_effect = yes
+	}
+
+	on_white_peace_desc = {
+		first_valid = {
+			triggered_desc = {
+				trigger = { scope:defender = { is_local_player = yes } }
+				desc = claim_cb_white_peace_desc_defender
+			}
+			desc = claim_cb_white_peace_desc
+		}
+	}
+
+	# The claim survives a white peace, as vanilla's does. The record does not
+	# have a draw here, but a campaign may, and a crown that fought to a
+	# standstill still thinks the land is owed to it.
+	on_white_peace = {
+		scope:attacker = { show_pow_release_message_effect = yes }
+		add_truce_white_peace_effect = yes
+	}
+
+	on_defeat_desc = {
+		first_valid = {
+			triggered_desc = {
+				trigger = { scope:defender = { is_local_player = yes } }
+				desc = claim_cb_defeat_desc_defender
+			}
+			triggered_desc = {
+				trigger = { scope:attacker = { is_local_player = yes } }
+				desc = claim_cb_defeat_desc_attacker
+			}
+			desc = claim_cb_defeat_desc
+		}
+	}
+
+	# A lost crusade loses the claim and pays for itself, as a lost claim war
+	# does in vanilla. The Director tilted the war; it does not undo the result.
+	on_defeat = {
+		scope:attacker = { show_pow_release_message_effect = yes }
+
+		every_in_list = {
+			list = target_titles
+			scope:claimant = { remove_claim = prev }
+		}
+
+		scope:attacker = {
+			pay_short_term_gold_reparations_effect = {
+				GOLD_VALUE = 3
+			}
+		}
+
+		modify_all_participants_fame_values = {
+			WINNER = scope:defender
+			LOSER = scope:attacker
+			FAME_BASE = major_prestige_value
+			IS_RELIGIOUS_WAR = yes
+			WINNER_FAME_SCALE = scale_10_war_defender_win
+			LOSER_FAME_SCALE = -10
+			WINNER_ALLY_FAME_SCALE = 10
+			LOSER_ALLY_FAME_SCALE = 10
+		}
+
+		add_truce_attacker_defeat_effect = yes
+	}
+
+	transfer_behavior = transfer
+
+	on_primary_attacker_death = inherit
+	on_primary_defender_death = inherit
+
+	attacker_allies_inherit = yes
+	defender_allies_inherit = yes
+
+	war_name = "hd_albigensian_crusade_war_name"
+	my_war_name = "hd_albigensian_crusade_war_name_my"
+	war_name_base = "hd_albigensian_crusade_war_name_base"
+	cb_name = "hd_albigensian_crusade_cb_name"
+
+	interface_priority = 100
+
+	attacker_wargoal_percentage = 0.8
+
+	max_defender_score_from_occupation = 150
+	max_attacker_score_from_occupation = 150
+}

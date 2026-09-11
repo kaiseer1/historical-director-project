@@ -1,4 +1,4 @@
-# Historical Director - execution pump.
+# Historical Director - execution pump, and the log-clear executor.
 #
 # A 1x1 window parked in a corner that recreates itself on a timer. Each time
 # it is created it runs the orchestrator's staged effect file. This is the only
@@ -13,6 +13,12 @@
 # a session killed the pump permanently. Running the file concurrently is
 # harmless anyway, because every batch carries a token guard and re-running a
 # completed batch does nothing.
+#
+# Note what recreates and what does not. `hd_runner_counter` rebuilds itself
+# every two seconds; the window around it does not, and neither do the log
+# clear slots below. That is the point of putting them here: they need to
+# outlive a single tick to see a request arrive, and they are resurrected along
+# with the window by the re-arm network whenever a fullscreen event kills it.
 
 window = {
 	name = "hd_runner"
@@ -38,8 +44,81 @@ window = {
 		state = {
 			name = _show2
 			trigger_on_create = yes
+			# HD_PUMP_INTERVAL - rewritten at deploy time from
+			# director.pumpIntervalSeconds; see src/setup/deployMod.js. The
+			# literal below is the default and is what a hand-copied mod gets.
+			#
+			# It is not only a latency knob. Every `run` executed from here
+			# makes CK3 re-walk its whole script database and re-report every
+			# unset variable and flag in every loaded mod - measured live on
+			# 2026-09-08 at 315 error.log lines per tick, of which 10 were
+			# ours and 305 belonged to other mods. That cost is linear in this
+			# number and in how many mods are loaded, so a heavy modlist may
+			# want 5 or 10 here where a clean install can leave it at 2.
 			duration = 2
 			on_finish = "[ExecuteConsoleCommand('gui.createwidget gui/custom_gui/hd_runner.gui hd_runner_counter')]"
+		}
+	}
+
+	# --- log clear slots -----------------------------------------------------
+	#
+	# CK3 stops logging after roughly 17MB of cumulative writes in a session,
+	# and the Director is a heavy writer: one snapshot of a wide sphere is
+	# thousands of lines. Truncating debug.log from outside does not help,
+	# because the engine counts what it has written rather than what is still
+	# on disk. `log.clearAll` resets that counter and is the only thing that
+	# does. Both facts are the VOTC project's, measured rather than reasoned
+	# about; see issue #1 on this repository.
+	#
+	# One hbox per slot, one state per hbox. Sibling states under a single
+	# widget are mutually exclusive state machines in this engine and an extra
+	# one can starve the others - VOTC lost two implementations to that rule
+	# before finding it - so nothing here stacks a second state anywhere.
+	#
+	# `on_start` clears the log; `on_finish` retires the slot through the
+	# scripted GUI, so the request is consumed by the thing that serviced it.
+	# The orchestrator also retires the previous slot with each new request,
+	# which is redundancy rather than duplication: if this widget was dead when
+	# the request arrived, the slot would otherwise stand set for ever and its
+	# turn in the rotation would never present a fresh edge again.
+
+	hbox = {
+		name = "hd_log_clear_a"
+		state = {
+			name = fire
+			trigger_when = "[GetScriptedGui('hd_log_clear_a').IsShown( GuiScope.SetRoot( GetPlayer.MakeScope ).End )]"
+			on_start = "[ExecuteConsoleCommand('log.clearAll')]"
+			on_finish = "[GetScriptedGui('hd_log_clear_a').Execute( GuiScope.SetRoot( GetPlayer.MakeScope ).End )]"
+		}
+	}
+
+	hbox = {
+		name = "hd_log_clear_b"
+		state = {
+			name = fire
+			trigger_when = "[GetScriptedGui('hd_log_clear_b').IsShown( GuiScope.SetRoot( GetPlayer.MakeScope ).End )]"
+			on_start = "[ExecuteConsoleCommand('log.clearAll')]"
+			on_finish = "[GetScriptedGui('hd_log_clear_b').Execute( GuiScope.SetRoot( GetPlayer.MakeScope ).End )]"
+		}
+	}
+
+	hbox = {
+		name = "hd_log_clear_c"
+		state = {
+			name = fire
+			trigger_when = "[GetScriptedGui('hd_log_clear_c').IsShown( GuiScope.SetRoot( GetPlayer.MakeScope ).End )]"
+			on_start = "[ExecuteConsoleCommand('log.clearAll')]"
+			on_finish = "[GetScriptedGui('hd_log_clear_c').Execute( GuiScope.SetRoot( GetPlayer.MakeScope ).End )]"
+		}
+	}
+
+	hbox = {
+		name = "hd_log_clear_d"
+		state = {
+			name = fire
+			trigger_when = "[GetScriptedGui('hd_log_clear_d').IsShown( GuiScope.SetRoot( GetPlayer.MakeScope ).End )]"
+			on_start = "[ExecuteConsoleCommand('log.clearAll')]"
+			on_finish = "[GetScriptedGui('hd_log_clear_d').Execute( GuiScope.SetRoot( GetPlayer.MakeScope ).End )]"
 		}
 	}
 }

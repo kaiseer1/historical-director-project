@@ -27,7 +27,7 @@
  *                                               + kabulistan)
  *
  * Both supersets were Phase I alongside their own parts, so a player in Rayy -
- * a case PROGRESS.md records as tested - got a sphere holding both
+ * a case tested in a live campaign - got a sphere holding both
  * `world_middle_east` and `world_persia`, and every Persian county counted
  * twice. The supersets are gone. `world_middle_east` is replaced by the two
  * halves the game already defines, and Persia and its eastern neighbours stand

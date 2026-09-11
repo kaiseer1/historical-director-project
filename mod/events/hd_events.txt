@@ -412,6 +412,13 @@ hd_event.0200 = {
 		name = hd_event.0200.b
 		add_prestige = minor_prestige_gain
 	}
+
+	# Re-arms the execution pump. This window is fullscreen, and a fullscreen
+	# window can silently kill the console-created widget the pump lives in.
+	widget = {
+		gui = "hd_rearm_widget"
+		container = "custom_widgets_container"
+	}
 }
 
 # The inheritance opening, five years on, and only from the strongest tier. It
@@ -476,6 +483,13 @@ hd_event.0210 = {
 	option = {
 		name = hd_event.0210.a
 	}
+
+	# Re-arms the execution pump. This window is fullscreen, and a fullscreen
+	# window can silently kill the console-created widget the pump lives in.
+	widget = {
+		gui = "hd_rearm_widget"
+		container = "custom_widgets_container"
+	}
 }
 
 hd_event.0211 = {
@@ -491,5 +505,479 @@ hd_event.0211 = {
 
 	option = {
 		name = hd_event.0211.a
+	}
+
+	# Re-arms the execution pump. This window is fullscreen, and a fullscreen
+	# window can silently kill the console-created widget the pump lives in.
+	widget = {
+		gui = "hd_rearm_widget"
+		container = "custom_widgets_container"
+	}
+}
+
+# ===========================================================================
+# The Almohad collapse - hd_event.0220 / 0221 / 0222
+#
+# Staged by the almohad_collapse macro action. Three events, because the
+# collapse looks like three different things depending on where you are
+# standing: the caliph loses a state, the neighbours gain an opportunity, and
+# the governor who stops answering gains a country.
+#
+# Severity arrives as the global variable hd_collapse_level, 1 to 3, exactly as
+# hd_pressure_level does for hd_event.0200. The branches below are written out
+# once per level rather than parameterised, which is duplication on purpose:
+# this mod has been bitten by $PARAM$ substitution before (see the header of
+# common/scripted_effects/hd_perception_effects.txt) and every construct used
+# here is one hd_event.0200 already exercises in a live game.
+# ===========================================================================
+
+# The collapsing power. Fired at the Almohad ruler named in the proposal.
+hd_event.0220 = {
+	type = character_event
+	title = hd_event.0220.t
+	desc = hd_event.0220.desc
+	theme = realm
+
+	left_portrait = {
+		character = root
+		animation = disbelief
+	}
+
+	trigger = {
+		is_landed = yes
+	}
+
+	# Effects sit here rather than under the option, which is the opposite of
+	# hd_event.0200 and deliberate. 0200 offers a coalition to a ruler who may
+	# take it up or not, so its effects belong to a choice. Nobody chooses their
+	# own disintegration: by the time this fires the player has already approved
+	# it in the sidebar, and asking the caliph to consent to it would be a
+	# fiction. The option below is an acknowledgement, not a decision.
+	immediate = {
+		debug_log = "HD:/;/event_fired/;/hd_event.0220"
+		save_scope_as = hd_collapsing
+
+		# --- the standing condition ---------------------------------------
+		if = {
+			limit = { global_var:hd_collapse_level = 1 }
+			add_character_modifier = {
+				modifier = hd_almohad_fraying
+				years = 20
+			}
+		}
+		if = {
+			limit = { global_var:hd_collapse_level = 2 }
+			add_character_modifier = {
+				modifier = hd_almohad_breaking
+				years = 25
+			}
+		}
+		if = {
+			limit = { global_var:hd_collapse_level = 3 }
+			add_character_modifier = {
+				modifier = hd_almohad_shattered
+				years = 30
+			}
+		}
+
+		# --- the moment they noticed --------------------------------------
+		#
+		# Every landed vassal, whether or not they end up leaving. This is what
+		# feeds vanilla's independence faction scoring, which reads liege
+		# opinion at -0.4 per point against a base reluctance of -150; see
+		# common/factions/00_factions.txt. A vassal who does not defect today
+		# is still measurably likelier to at any point in the next 25 years,
+		# which is the ambient half of the collapse and the half that keeps
+		# working after this event is forgotten.
+		every_vassal = {
+			limit = { is_landed = yes }
+			add_opinion = {
+				modifier = hd_caliphal_authority_broken
+				target = scope:hd_collapsing
+			}
+		}
+
+		# --- and those who leave now --------------------------------------
+		#
+		# The roll is per vassal, gated by can_create_faction so the game's own
+		# rules keep their veto: a vassal already in a faction, under truce
+		# from a recent independence war, or otherwise barred is skipped
+		# rather than forced. That gate is why this is a shove and not a
+		# scripted outcome - the engine still decides who is able to go.
+		if = {
+			limit = { global_var:hd_collapse_level = 1 }
+			every_vassal = {
+				limit = {
+					is_landed = yes
+					can_create_faction = {
+						type = independence_faction
+						target = scope:hd_collapsing
+					}
+				}
+				random = {
+					chance = 15
+					create_faction = {
+						type = independence_faction
+						target = scope:hd_collapsing
+					}
+					add_character_modifier = {
+						modifier = hd_taifa_risen
+						years = 20
+					}
+					trigger_event = hd_event.0222
+				}
+			}
+		}
+		if = {
+			limit = { global_var:hd_collapse_level = 2 }
+			every_vassal = {
+				limit = {
+					is_landed = yes
+					can_create_faction = {
+						type = independence_faction
+						target = scope:hd_collapsing
+					}
+				}
+				random = {
+					chance = 40
+					create_faction = {
+						type = independence_faction
+						target = scope:hd_collapsing
+					}
+					add_character_modifier = {
+						modifier = hd_taifa_risen
+						years = 20
+					}
+					trigger_event = hd_event.0222
+				}
+			}
+		}
+		if = {
+			limit = { global_var:hd_collapse_level = 3 }
+			every_vassal = {
+				limit = {
+					is_landed = yes
+					can_create_faction = {
+						type = independence_faction
+						target = scope:hd_collapsing
+					}
+				}
+				random = {
+					chance = 60
+					create_faction = {
+						type = independence_faction
+						target = scope:hd_collapsing
+					}
+					add_character_modifier = {
+						modifier = hd_taifa_risen
+						years = 20
+					}
+					trigger_event = hd_event.0222
+				}
+			}
+		}
+	}
+
+	option = {
+		name = hd_event.0220.a
+	}
+
+	# Re-arms the execution pump. This window is fullscreen, and a fullscreen
+	# window can silently kill the console-created widget the pump lives in.
+	widget = {
+		gui = "hd_rearm_widget"
+		container = "custom_widgets_container"
+	}
+}
+
+# Those taking the ground. Fired at each claimant named in the proposal.
+hd_event.0221 = {
+	type = character_event
+	title = hd_event.0221.t
+	desc = hd_event.0221.desc
+	theme = realm
+
+	left_portrait = {
+		character = root
+		animation = thinking
+	}
+
+	trigger = {
+		is_landed = yes
+	}
+
+	immediate = {
+		debug_log = "HD:/;/event_fired/;/hd_event.0221"
+	}
+
+	# Here the option does carry the effect, because here there is a choice: a
+	# neighbour may decline to make anything of someone else's collapse. What
+	# it grants is an appetite and a small edge, never a claim and never a war.
+	option = {
+		name = hd_event.0221.a
+
+		add_character_modifier = {
+			modifier = hd_taifa_ascendant
+			years = 25
+		}
+	}
+
+	option = {
+		name = hd_event.0221.b
+	}
+
+	widget = {
+		gui = "hd_rearm_widget"
+		container = "custom_widgets_container"
+	}
+}
+
+# The governor who stopped answering. Fired at each vassal the roll above
+# carried out of the caliph's realm, so that the defection is visible in the
+# campaign rather than appearing silently in the faction list.
+hd_event.0222 = {
+	type = character_event
+	title = hd_event.0222.t
+	desc = hd_event.0222.desc
+	theme = realm
+
+	left_portrait = {
+		character = root
+		animation = personality_bold
+	}
+
+	immediate = {
+		debug_log = "HD:/;/event_fired/;/hd_event.0222"
+	}
+
+	option = {
+		name = hd_event.0222.a
+	}
+
+	widget = {
+		gui = "hd_rearm_widget"
+		container = "custom_widgets_container"
+	}
+}
+
+# ===========================================================================
+# Historical wars - hd_event.0230 / 0231: the Conquest of Majorca
+#
+# Staged by the historical_war action, and only once start_war has been seen
+# to take. Flavour only: the batch has already done everything mechanical, so
+# these carry no effects and cannot half-apply a war. One pair per curated war;
+# the next one takes 0232 and 0233.
+# ===========================================================================
+
+hd_event.0230 = {
+	type = character_event
+	title = hd_event.0230.t
+	desc = hd_event.0230.desc
+	theme = realm
+
+	left_portrait = {
+		character = root
+		animation = personality_bold
+	}
+
+	immediate = {
+		debug_log = "HD:/;/event_fired/;/hd_event.0230"
+	}
+
+	option = {
+		name = hd_event.0230.a
+	}
+
+	widget = {
+		gui = "hd_rearm_widget"
+		container = "custom_widgets_container"
+	}
+}
+
+hd_event.0231 = {
+	type = character_event
+	title = hd_event.0231.t
+	desc = hd_event.0231.desc
+	theme = realm
+
+	left_portrait = {
+		character = root
+		animation = worry
+	}
+
+	immediate = {
+		debug_log = "HD:/;/event_fired/;/hd_event.0231"
+	}
+
+	option = {
+		name = hd_event.0231.a
+	}
+
+	widget = {
+		gui = "hd_rearm_widget"
+		container = "custom_widgets_container"
+	}
+}
+
+# ===========================================================================
+# Historical wars - hd_event.0232 / 0233: the Conquest of Cordoba
+#                  hd_event.0234 / 0235: the Conquest of Seville
+#
+# As 0230/0231: flavour only, fired once start_war has been seen to take.
+# ===========================================================================
+
+hd_event.0232 = {
+	type = character_event
+	title = hd_event.0232.t
+	desc = hd_event.0232.desc
+	theme = realm
+
+	left_portrait = {
+		character = root
+		animation = personality_bold
+	}
+
+	immediate = {
+		debug_log = "HD:/;/event_fired/;/hd_event.0232"
+	}
+
+	option = {
+		name = hd_event.0232.a
+	}
+
+	widget = {
+		gui = "hd_rearm_widget"
+		container = "custom_widgets_container"
+	}
+}
+
+hd_event.0233 = {
+	type = character_event
+	title = hd_event.0233.t
+	desc = hd_event.0233.desc
+	theme = realm
+
+	left_portrait = {
+		character = root
+		animation = worry
+	}
+
+	immediate = {
+		debug_log = "HD:/;/event_fired/;/hd_event.0233"
+	}
+
+	option = {
+		name = hd_event.0233.a
+	}
+
+	widget = {
+		gui = "hd_rearm_widget"
+		container = "custom_widgets_container"
+	}
+}
+
+hd_event.0234 = {
+	type = character_event
+	title = hd_event.0234.t
+	desc = hd_event.0234.desc
+	theme = realm
+
+	left_portrait = {
+		character = root
+		animation = personality_bold
+	}
+
+	immediate = {
+		debug_log = "HD:/;/event_fired/;/hd_event.0234"
+	}
+
+	option = {
+		name = hd_event.0234.a
+	}
+
+	widget = {
+		gui = "hd_rearm_widget"
+		container = "custom_widgets_container"
+	}
+}
+
+hd_event.0235 = {
+	type = character_event
+	title = hd_event.0235.t
+	desc = hd_event.0235.desc
+	theme = realm
+
+	left_portrait = {
+		character = root
+		animation = worry
+	}
+
+	immediate = {
+		debug_log = "HD:/;/event_fired/;/hd_event.0235"
+	}
+
+	option = {
+		name = hd_event.0235.a
+	}
+
+	widget = {
+		gui = "hd_rearm_widget"
+		container = "custom_widgets_container"
+	}
+}
+
+# ===========================================================================
+# Historical wars - hd_event.0236 / 0237: the Albigensian Crusade
+#
+# As 0230/0231: flavour only, fired once start_war has been seen to take.
+# ===========================================================================
+
+hd_event.0236 = {
+	type = character_event
+	title = hd_event.0236.t
+	desc = hd_event.0236.desc
+	theme = realm
+
+	left_portrait = {
+		character = root
+		animation = personality_bold
+	}
+
+	immediate = {
+		debug_log = "HD:/;/event_fired/;/hd_event.0236"
+	}
+
+	option = {
+		name = hd_event.0236.a
+	}
+
+	widget = {
+		gui = "hd_rearm_widget"
+		container = "custom_widgets_container"
+	}
+}
+
+hd_event.0237 = {
+	type = character_event
+	title = hd_event.0237.t
+	desc = hd_event.0237.desc
+	theme = realm
+
+	left_portrait = {
+		character = root
+		animation = worry
+	}
+
+	immediate = {
+		debug_log = "HD:/;/event_fired/;/hd_event.0237"
+	}
+
+	option = {
+		name = hd_event.0237.a
+	}
+
+	widget = {
+		gui = "hd_rearm_widget"
+		container = "custom_widgets_container"
 	}
 }

@@ -217,10 +217,28 @@ function renderWorld() {
   host.textContent = '';
   if (!s) return;
 
+  // The bridge has gone quiet, and there are two ways that happens which need
+  // opposite responses. Shown above the pump warning because when the log
+  // subsystem is exhausted every pump symptom is present too - the echo cannot
+  // reach us either - and telling someone to use Recall would send them to fix
+  // a thing that is not broken with a tool that cannot work.
+  if (s.banner) {
+    const warn = el('div', 'warn');
+    warn.appendChild(el('strong', null, s.banner.text));
+    warn.appendChild(el('p', null, s.banner.detail));
+    if (s.banner.kind === 'pump_dead') {
+      warn.appendChild(el('div', 'effect', 'gui.createwidget gui/custom_gui/hd_runner.gui hd_runner'));
+    }
+    host.appendChild(warn);
+  }
+
   // The failure that actually strands people: requests pile up in the run file
   // and nothing ever executes them, which from the game's side looks like
   // nothing at all happening. Say so, and say what to do about it.
-  if (s.pumpAlive === false) {
+  //
+  // Suppressed while a banner is up, because the banner has already said this
+  // in more detail, or has said something that contradicts it.
+  if (s.pumpAlive === false && !s.banner) {
     const warn = el('div', 'warn');
     warn.appendChild(el('strong', null, 'The execution pump is not running.'));
     warn.appendChild(el('p', null,
@@ -228,6 +246,20 @@ function renderWorld() {
     warn.appendChild(el('p', null, 'Use the "Recall the Historical Director" decision in game, or paste this into the CK3 console:'));
     warn.appendChild(el('div', 'effect', 'gui.createwidget gui/custom_gui/hd_runner.gui hd_runner'));
     host.appendChild(warn);
+  }
+
+  // How close this session is to the wall CK3 puts on its own logging. Only
+  // shown once it is worth knowing about: below half the threshold it is noise,
+  // and the whole point of the clear chain is that the player should never
+  // have to think about it.
+  if (s.log && !s.log.supported) {
+    host.appendChild(el('div', 'warn',
+      'The deployed companion mod cannot clear the game log. CK3 can stop logging after as little as 17MB in a session, '
+      + 'and after that the Director goes blind until you restart the game. Redeploy the mod to fix this.'));
+  } else if (s.log && s.log.mbSinceClear > s.log.thresholdMB / 2) {
+    host.appendChild(el('div', 'note',
+      `${s.log.mbSinceClear}MB read from the game log since the last clear, of ${s.log.thresholdMB}MB before the next one is requested`
+      + (s.log.clears ? ` (${s.log.clears} so far this session)` : '')));
   }
 
   if (s.sphere?.unsupported?.length && !s.sphere.home?.length) {

@@ -53,6 +53,19 @@ export const MACRO_MIN_MOD = '0.4.3';
 export const MOMENT_MIN_MOD = '0.5.0';
 
 /**
+ * The mod version that first carried the log-clear executor: the four
+ * hd_log_clear_* scripted GUIs and the widget slots that watch them.
+ *
+ * Gated like the rest, but for a sharper reason than the others. An older mod
+ * would take a clear request as a global variable nothing ever reads: no error,
+ * no refusal, and no clear - so the byte budget would never reset and the
+ * orchestrator would ask again on every tick, for ever, while the log marched
+ * on to the 17MB wall it was trying to avoid. A feature that silently does
+ * nothing is worse here than one that is refused out loud.
+ */
+export const LOGCLEAR_MIN_MOD = '0.6.0';
+
+/**
  * Compare two dotted version strings numerically.
  * @returns {number} negative when a < b, 0 when equal, positive when a > b
  */
@@ -171,6 +184,16 @@ export function momentSupport(ck3UserFolder) {
   );
 }
 
+/** @param {string} ck3UserFolder */
+export function logClearSupport(ck3UserFolder) {
+  return featureSupport(
+    ck3UserFolder,
+    LOGCLEAR_MIN_MOD,
+    'clearing the game log',
+    'the scripted GUIs and widget slots that execute log.clearAll',
+  );
+}
+
 /**
  * @param {string} ck3UserFolder
  */
@@ -180,5 +203,51 @@ export function macroSupport(ck3UserFolder) {
     MACRO_MIN_MOD,
     'the Iberian pressure event',
     'its modifiers, its event chain and the union decision',
+  );
+}
+
+/**
+ * The mod version that first carried the Almohad collapse: the five
+ * hd_almohad_* / hd_taifa_* modifiers, the hd_caliphal_authority_broken opinion
+ * modifier and the hd_event.0220-0222 chain.
+ *
+ * A fifth threshold rather than a bump of an existing one, for the reason
+ * MOMENT_MIN_MOD gives: the features are independent, and collapsing them would
+ * refuse a working feature to protect a different one. A 0.6.0 mod runs Iberian
+ * pressure and the moment library perfectly well and has no collapse content at
+ * all.
+ */
+export const COLLAPSE_MIN_MOD = '0.7.0';
+
+/** @param {string} ck3UserFolder */
+export function collapseSupport(ck3UserFolder) {
+  return featureSupport(
+    ck3UserFolder,
+    COLLAPSE_MIN_MOD,
+    'the Almohad collapse',
+    'its modifiers, its opinion modifier and its event chain',
+  );
+}
+
+/**
+ * The mod version that first carried the historical war library: the
+ * hd_conquest_of_majorca_cb casus belli, the hd_crusade_zeal and
+ * hd_beleaguered_realm modifiers, and hd_event.0230-0231.
+ *
+ * Gated for the quietest failure of any feature here. A mod without the casus
+ * belli would not fail loudly: start_war would be refused, the claim and the
+ * modifiers would still land, and the batch would honestly report claim_only -
+ * so the player would approve a war and receive a claim, every time, with
+ * nothing to say why.
+ */
+export const WAR_MIN_MOD = '0.8.0';
+
+/** @param {string} ck3UserFolder */
+export function warSupport(ck3UserFolder) {
+  return featureSupport(
+    ck3UserFolder,
+    WAR_MIN_MOD,
+    'historical wars',
+    'the casus belli, modifiers and events they use',
   );
 }

@@ -35,6 +35,8 @@ export class SnapshotAssembler {
           regionsById: new Map(),
           /** @type {Map<number, {id: number, attacker: number, defender: number, name: string}>} */
           warsById: new Map(),
+          /** @type {Map<string, {holder: number|null, top: number|null}>} */
+          titleHolders: new Map(),
         };
         return null;
 
@@ -178,6 +180,41 @@ export class SnapshotAssembler {
         }
         return null;
       }
+
+      case 'title_holder': {
+        // Who holds one of the handful of titles the historical war library
+        // asks about. Only those: the snapshot does not survey titles, it looks
+        // up the ones a curated war is fought over, so a war can be refused as
+        // already fought rather than offered as though the record had not yet
+        // happened. "none" is a title that exists and is held by nobody; a
+        // title the campaign's mods do not define sends no record at all.
+        if (!this.pending) return null;
+        const title = rec.fields[0];
+        if (!title) return null;
+        const id = rec.fields[1] === 'none' ? null : Number(rec.fields[1]);
+        if (id !== null && !Number.isFinite(id)) return null;
+        this.pending.titleHolders.set(title, { holder: id, top: null });
+        return null;
+      }
+
+      case 'title_top': {
+        // Always follows its title_holder, from inside the holder's own scope,
+        // so an independent ruler reports themself here.
+        if (!this.pending) return null;
+        const title = rec.fields[0];
+        const id = Number(rec.fields[1]);
+        if (!title || !Number.isFinite(id)) return null;
+        const prior = this.pending.titleHolders.get(title) ?? { holder: null, top: null };
+        this.pending.titleHolders.set(title, { ...prior, top: id });
+        return null;
+      }
+
+      case 'log_clear_requested':
+        // The echo of our own request, written by the same batch that set the
+        // slot variable. It confirms the batch executed, which is not the same
+        // as the clear happening - only the log shrinking says that, and the
+        // tailer is what sees it.
+        return { type: 'logClearRequested', slot: rec.fields[0] ?? '' };
 
       case 'mod_version':
         // What the running game has loaded, which is not the same question as
