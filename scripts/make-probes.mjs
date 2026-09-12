@@ -418,10 +418,22 @@ const PLACEHOLDER = '# nothing yet - rewrite with --slot and --effect';
 const dispatchProbe = [
   `# Historical Director - probe P5: do the dispatch reply effects actually land?`,
   `#`,
-  `# Runs on the PLAYER, taking real gold and piety. Use a throwaway campaign.`,
+  `# NET ZERO. Takes the cost, reads the balance, then gives it straight back,`,
+  `# so this is safe on a campaign you care about.`,
   `#`,
-  `# Reports gold and piety before and after, because "the line executed" and`,
-  `# "the player is 150 poorer" are different claims and only the second matters.`,
+  `# Three readings, and the middle one is the whole probe. "The line executed"`,
+  `# and "the player is 150 poorer" are different claims and only the second`,
+  `# answers the question - so the cost has to actually land before it is undone,`,
+  `# and the restored reading is what proves it was undone.`,
+  `#`,
+  `# The one thing left behind is +25 opinion from a neighbour, which is a gift`,
+  `# and not a cost. Reversing it would need a second modifier stacked on the`,
+  `# first rather than a cancellation, which would leave more behind than it`,
+  `# removed.`,
+  `#`,
+  `# If add_gold turns out not to work, before == after == restored and nothing`,
+  `# moved either way. If it works and the restore somehow does not, you are down`,
+  `# 150 gold and 100 piety, which is the whole exposure.`,
   ``,
   `title:${ANCHOR} = {`,
   `${T}if = {`,
@@ -460,6 +472,18 @@ const dispatchProbe = [
   ``,
   `${T}every_player = {`,
   `${T}${T}debug_log = "HD:/;/probe_reply/;/after/;/[THIS.Char.GetGold]/;/[THIS.Char.GetPiety]/;/[THIS.Char.GetPrestige]"`,
+  `${T}}`,
+  ``,
+  `${T}# 3. give it back. Ordered after the reading on purpose: the cost has to`,
+  `${T}#    have actually landed for the middle reading to mean anything, and`,
+  `${T}#    this is what makes taking it safe.`,
+  `${T}scope:hd_probe_player = {`,
+  `${T}${T}add_gold = 150`,
+  `${T}${T}add_piety = 100`,
+  `${T}}`,
+  ``,
+  `${T}every_player = {`,
+  `${T}${T}debug_log = "HD:/;/probe_reply/;/restored/;/[THIS.Char.GetGold]/;/[THIS.Char.GetPiety]/;/[THIS.Char.GetPrestige]"`,
   `${T}}`,
   `${T}debug_log = "HD:/;/probe_reply/;/ran/;/[scope:hd_probe_sender.Char.GetID]"`,
   `}`,
@@ -590,7 +614,7 @@ console.log('  1.  node scripts/find-effects.mjs      read the answers off the g
 console.log('  2.  npm run deploy:mod                 carries the P4 probe CB in');
 console.log('  3.  RESTART CK3                        required once; issue #1 section 8');
 console.log('  4.  console: run hd_probe_peace.txt    then unpause, then run it again');
-console.log('      console: run hd_probe_reply.txt    takes real gold - throwaway campaign');
+console.log('      console: run hd_probe_reply.txt    net zero - safe on a real save');
 console.log('  5.  node scripts/read-probes.mjs       after each run');
 console.log('');
 console.log('P1 answers first. If the AI abandons an unwinnable war within a few');

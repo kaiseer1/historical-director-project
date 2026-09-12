@@ -299,8 +299,8 @@ if (reply.length === 0) {
   console.log(cleared
     ? `\n  No output — but the log was cleared at ${clear.at}, so this may have been`
       + '\n  erased rather than never run. Re-run it with the orchestrator stopped.\n'
-    : '\n  No output. Run hd_probe_reply.txt. It takes real gold and piety from'
-      + '\n  the player, so use a throwaway campaign.\n');
+    : '\n  No output. Run hd_probe_reply.txt. It is net zero - it takes the cost,'
+      + '\n  reads the balance, then gives it back - so it is safe on a real save.\n');
 } else if (reply.some((r) => r[0] === 'preconditions_unmet')) {
   console.log('\n  Preconditions unmet - the sender title did not resolve, or it is you.');
   console.log('  Pass a different --anchor and rebuild the probes.\n');
@@ -311,11 +311,12 @@ if (reply.length === 0) {
     console.log('\n  Only half the readings arrived, so the block did not finish. Check');
     console.log('  error.log for a line naming the run file.\n');
   } else {
+    const restored = reply.find((r) => r[0] === 'restored');
     const n = (v) => Number(String(v ?? '').replace(/[^0-9.-]/g, ''));
     const dg = n(after[1]) - n(before[1]);
     const dp = n(after[2]) - n(before[2]);
-    console.log(`\n  gold   ${before[1]} -> ${after[1]}   (${dg})`);
-    console.log(`  piety  ${before[2]} -> ${after[2]}   (${dp})\n`);
+    console.log(`\n  gold   ${before[1]} -> ${after[1]}${restored ? ` -> ${restored[1]}` : ''}   (charged ${dg})`);
+    console.log(`  piety  ${before[2]} -> ${after[2]}${restored ? ` -> ${restored[2]}` : ''}   (charged ${dp})\n`);
 
     if (dg <= -150 && dp <= -100) {
       console.log('  Both costs were charged. A negative add_gold works, which is what the');
@@ -329,6 +330,29 @@ if (reply.length === 0) {
     } else {
       console.log('  Partly charged. Whichever one did not move is the effect to replace,');
       console.log('  and until it is, its reply must stop naming a cost it does not take.');
+    }
+
+    // The probe is net zero by design, and "by design" is not evidence. A
+    // restore that silently failed leaves the player out of pocket on a probe
+    // that promised not to cost them anything, which is exactly the kind of
+    // quiet debt this project refuses to leave lying around.
+    console.log('');
+    if (!restored) {
+      console.log('  NO RESTORED READING. The block did not reach the line that gives the');
+      console.log('  gold and piety back, so you ARE down whatever was charged above.');
+      console.log('  Check error.log for a line naming the run file.');
+    } else {
+      const rg = n(restored[1]) - n(before[1]);
+      const rp = n(restored[2]) - n(before[2]);
+      if (rg === 0 && rp === 0) {
+        console.log('  Restored exactly. The probe cost you nothing, and the +25 opinion a');
+        console.log('  neighbour now holds of you is the only thing it left behind.');
+      } else {
+        console.log(`  NOT fully restored: gold is ${rg >= 0 ? '+' : ''}${rg} and piety ${rp >= 0 ? '+' : ''}${rp}`);
+        console.log('  against where you started. Small drift is ordinary income arriving');
+        console.log('  mid-batch; anything near the charged amounts means the restore did');
+        console.log('  not run and you should put it back by hand.');
+      }
     }
 
     console.log('');
