@@ -207,6 +207,54 @@ if (name.length === 0) {
   console.log('');
 }
 
+
+// --------------------------------------------------------------------------
+// P5 - dispatch reply effects
+// --------------------------------------------------------------------------
+console.log(bar('P5  Do the dispatch reply effects actually land?'));
+
+const reply = records('probe_reply');
+if (reply.length === 0) {
+  console.log('\n  No output. Run hd_probe_reply.txt. It takes real gold and piety from');
+  console.log('  the player, so use a throwaway campaign.\n');
+} else if (reply.some((r) => r[0] === 'preconditions_unmet')) {
+  console.log('\n  Preconditions unmet - the sender title did not resolve, or it is you.');
+  console.log('  Pass a different --anchor and rebuild the probes.\n');
+} else {
+  const before = reply.find((r) => r[0] === 'before');
+  const after = reply.find((r) => r[0] === 'after');
+  if (!before || !after) {
+    console.log('\n  Only half the readings arrived, so the block did not finish. Check');
+    console.log('  error.log for a line naming the run file.\n');
+  } else {
+    const n = (v) => Number(String(v ?? '').replace(/[^0-9.-]/g, ''));
+    const dg = n(after[1]) - n(before[1]);
+    const dp = n(after[2]) - n(before[2]);
+    console.log(`\n  gold   ${before[1]} -> ${after[1]}   (${dg})`);
+    console.log(`  piety  ${before[2]} -> ${after[2]}   (${dp})\n`);
+
+    if (dg <= -150 && dp <= -100) {
+      console.log('  Both costs were charged. A negative add_gold works, which is what the');
+      console.log('  reply table depends on: every price the sidebar names is one the');
+      console.log('  player actually pays.');
+    } else if (dg === 0 && dp === 0) {
+      console.log('  NEITHER cost was charged, and nothing reported an error. That is the');
+      console.log('  worst outcome available - the sidebar names a price the game does not');
+      console.log('  take, so conciliate and tribute are free and the whole pressure');
+      console.log('  economy is decorative. Fix before any of this ships.');
+    } else {
+      console.log('  Partly charged. Whichever one did not move is the effect to replace,');
+      console.log('  and until it is, its reply must stop naming a cost it does not take.');
+    }
+
+    console.log('');
+    console.log('  The opinion cannot be read from the log. Open the sender in game and');
+    console.log('  look for the Historical Director modifier on their opinion of you.');
+    console.log('  Direction matters: it is THEIR opinion of YOU that should have moved.');
+  }
+  console.log('');
+}
+
 console.log(bar('What to do with this'));
 console.log('');
 console.log('  P1 gates everything. If the AI abandons unwinnable wars, no amount of');

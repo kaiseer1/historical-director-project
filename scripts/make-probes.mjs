@@ -392,6 +392,84 @@ function slotBody(slot, effect) {
 const PLACEHOLDER = '# nothing yet - rewrite with --slot and --effect';
 
 // --------------------------------------------------------------------------
+// P5 - does a dispatch reply land?
+// --------------------------------------------------------------------------
+//
+// The reply effects in director/dispatches.js have run against the simulated
+// game and never against the engine. Three separate questions hide in that,
+// and they fail in different ways:
+//
+//  - add_opinion with a mod-defined modifier, from one saved scope toward
+//    another. hd_historical_opinion is already used by set_relations, so this
+//    is the most likely of the three to work.
+//  - add_gold with a NEGATIVE value. Paying 150 gold is the first effect in
+//    this project that takes something away from the player rather than giving
+//    it, and an engine that floors at zero or refuses the line outright would
+//    make a cost that is named in the sidebar and never actually charged.
+//  - add_piety and add_prestige, same question.
+//
+// A reply whose price is displayed and not charged is worse than one that
+// cannot run: it is the sidebar lying about what the player just paid, which
+// is the failure this project spends most of its guards avoiding.
+//
+// So each effect reports what it did AND the balance either side of it. The
+// before-and-after is the whole probe: "the line executed" and "the player is
+// 150 poorer" are different claims and only the second one matters.
+const dispatchProbe = [
+  `# Historical Director - probe P5: do the dispatch reply effects actually land?`,
+  `#`,
+  `# Runs on the PLAYER, taking real gold and piety. Use a throwaway campaign.`,
+  `#`,
+  `# Reports gold and piety before and after, because "the line executed" and`,
+  `# "the player is 150 poorer" are different claims and only the second matters.`,
+  ``,
+  `title:${ANCHOR} = {`,
+  `${T}if = {`,
+  `${T}${T}limit = { exists = holder }`,
+  `${T}${T}holder = { top_liege = { save_scope_as = hd_probe_sender } }`,
+  `${T}}`,
+  `}`,
+  ``,
+  `every_player = {`,
+  `${T}save_scope_as = hd_probe_player`,
+  `${T}debug_log = "HD:/;/probe_reply/;/before/;/[THIS.Char.GetGold]/;/[THIS.Char.GetPiety]/;/[THIS.Char.GetPrestige]"`,
+  `}`,
+  ``,
+  `if = {`,
+  `${T}limit = {`,
+  `${T}${T}exists = scope:hd_probe_player`,
+  `${T}${T}exists = scope:hd_probe_sender`,
+  `${T}${T}scope:hd_probe_player != scope:hd_probe_sender`,
+  `${T}}`,
+  ``,
+  `${T}# 1. the cost. Negative, which is the half that has never been tried.`,
+  `${T}scope:hd_probe_player = {`,
+  `${T}${T}add_gold = -150`,
+  `${T}${T}add_piety = -100`,
+  `${T}}`,
+  ``,
+  `${T}# 2. the opinion, from the sender toward the player - that direction and`,
+  `${T}#    not the other, which is easy to get backwards and impossible to see.`,
+  `${T}scope:hd_probe_sender = {`,
+  `${T}${T}add_opinion = {`,
+  `${T}${T}${T}target = scope:hd_probe_player`,
+  `${T}${T}${T}modifier = hd_historical_opinion`,
+  `${T}${T}${T}opinion = 25`,
+  `${T}${T}}`,
+  `${T}}`,
+  ``,
+  `${T}every_player = {`,
+  `${T}${T}debug_log = "HD:/;/probe_reply/;/after/;/[THIS.Char.GetGold]/;/[THIS.Char.GetPiety]/;/[THIS.Char.GetPrestige]"`,
+  `${T}}`,
+  `${T}debug_log = "HD:/;/probe_reply/;/ran/;/[scope:hd_probe_sender.Char.GetID]"`,
+  `}`,
+  `else = {`,
+  `${T}debug_log = "HD:/;/probe_reply/;/preconditions_unmet"`,
+  `}`,
+  ``,
+].join('\n');
+
+// --------------------------------------------------------------------------
 // The P4 casus belli, written into the mod rather than the run folder.
 // --------------------------------------------------------------------------
 //
@@ -483,6 +561,7 @@ const written = [
   write('hd_probe_peace.txt', peace),
   write('hd_probe_truce.txt', truce),
   write('hd_probe_name.txt', warname),
+  write('hd_probe_reply.txt', dispatchProbe),
   write('hd_probe_slot_a.txt', slotBody('a', PLACEHOLDER)),
   write('hd_probe_slot_b.txt', slotBody('b', PLACEHOLDER)),
   write('hd_probe_slot_c.txt', slotBody('c', PLACEHOLDER)),
@@ -511,6 +590,7 @@ console.log('  1.  node scripts/find-effects.mjs      read the answers off the g
 console.log('  2.  npm run deploy:mod                 carries the P4 probe CB in');
 console.log('  3.  RESTART CK3                        required once; issue #1 section 8');
 console.log('  4.  console: run hd_probe_peace.txt    then unpause, then run it again');
+console.log('      console: run hd_probe_reply.txt    takes real gold - throwaway campaign');
 console.log('  5.  node scripts/read-probes.mjs       after each run');
 console.log('');
 console.log('P1 answers first. If the AI abandons an unwinnable war within a few');
