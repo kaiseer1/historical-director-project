@@ -33,6 +33,77 @@ fs.closeSync(fd);
 
 const lines = buf.toString('utf8').split(/\r?\n/);
 
+/**
+ * Did a probe never run, or did a log clear eat the evidence?
+ *
+ * Those are opposite conclusions and every "no output" branch below reported
+ * only the first. Watched happening on 2026-09-12: P5's effects were seen
+ * resolving in game, and minutes later debug.log held no probe records at all
+ * and this file said the probe had not been run.
+ *
+ * The orchestrator asks the game to clear its logs as they fill, and it has no
+ * idea a probe is in flight - `ackPending` only guards batches the orchestrator
+ * staged itself. So a probe run while the orchestrator is up can be erased
+ * between running it and reading it.
+ *
+ * The first version of this inferred a clear from an empty debug.log beside a
+ * large error.log. That was a guess, and a racy one: both files move constantly
+ * while the game runs, and it missed the very case it was written for because
+ * error.log had itself just been cleared.
+ *
+ * `log.clearAll` echoes itself. VOTC's document says so - "its own echo is line
+ * 2 of the fresh debug.log" - and a live log confirms it exactly:
+ *
+ *   [13:12:36] Running console command: log.clearAll
+ *   [13:12:36] console_success: All logs cleared
+ *
+ * So this asks the log rather than reasoning about its size. Evidence, not
+ * inference, which is the rule this whole probe set is built on.
+ *
+ * @returns {{cleared: boolean, at: string, line: number}}
+ */
+function lastClear() {
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (!lines[i].includes('Running console command: log.clearAll')) continue;
+    const stamp = lines[i].match(/^\[([0-9:]+)\]/)?.[1] ?? 'an unknown time';
+    return { cleared: true, at: stamp, line: i };
+  }
+  return { cleared: false, at: '', line: -1 };
+}
+
+const clear = lastClear();
+const cleared = clear.cleared;
+
+if (cleared) {
+  console.log(`\n${'!'.repeat(74)}`);
+  console.log(`This log was cleared at ${clear.at}. The game's own echo of log.clearAll is`);
+  console.log(`line ${clear.line + 1}, and everything written before it is gone.`);
+  console.log('');
+  console.log('Any probe you ran before then left no trace, so a "no output" below may');
+  console.log('mean "erased" rather than "never ran". The orchestrator clears the log as');
+  console.log('it fills and has no idea a probe is in flight.');
+  console.log('');
+  console.log('STOP THE ORCHESTRATOR, re-run the probe, and read it before starting the');
+  console.log('orchestrator again.');
+  console.log('!'.repeat(74));
+}
+
+// Whether the bridge is alive at all, which decides what a silence means. The
+// pump echoes the mod version through hd_mark_alive on every pass, so its
+// presence is proof the widget is running and its absence is the first thing to
+// fix before reading anything else as a result.
+const pumpAlive = lines.some((l) => l.includes('HD:/;/mod_version/;/'));
+if (!pumpAlive) {
+  console.log(`\n${'-'.repeat(74)}`);
+  console.log('No mod_version record anywhere in this log, so the execution pump has not');
+  console.log('run since the last clear. Every probe below will report no output whatever');
+  console.log('you typed, because nothing is executing run files at all.');
+  console.log('');
+  console.log('Take the Recall the Historical Director decision, or in the console:');
+  console.log('  gui.createwidget gui/custom_gui/hd_runner.gui hd_runner');
+  console.log('-'.repeat(74));
+}
+
 /** @param {string} tag */
 function records(tag) {
   return lines
@@ -49,9 +120,12 @@ console.log(bar('P1  Does the AI white-peace out of a war it cannot win?'));
 
 const peace = records('probe_peace');
 if (peace.length === 0) {
-  console.log('\n  No output. Either hd_probe_peace.txt has not been run, or the filename');
-  console.log('  did not exist when CK3 launched and run silently ignored it (issue #1');
-  console.log('  section 8). Check the console echo for "Running console command: run".\n');
+  console.log(cleared
+    ? `\n  No output — but the log was cleared at ${clear.at}, so this may have been`
+      + '\n  erased rather than never run. Re-run it with the orchestrator stopped.\n'
+    : '\n  No output. Either hd_probe_peace.txt has not been run, or the filename'
+      + '\n  did not exist when CK3 launched and run silently ignored it (issue #1'
+      + '\n  section 8). Check the console echo for "Running console command: run".\n');
 } else {
   const start = peace.filter((r) => r[0] === 'start');
   const refused = peace.filter((r) => r[0] === 'refused');
@@ -145,7 +219,10 @@ console.log(bar('P3  Does a script start_war ignore a truce?'));
 
 const truce = records('probe_truce').map((r) => r[0]);
 if (truce.length === 0) {
-  console.log('\n  No output. Run hd_probe_truce.txt.\n');
+  console.log(cleared
+    ? `\n  No output — but the log was cleared at ${clear.at}, so this may have been`
+      + '\n  erased rather than never run. Re-run it with the orchestrator stopped.\n'
+    : '\n  No output. Run hd_probe_truce.txt.\n');
 } else if (truce.includes('preconditions_unmet')) {
   console.log('\n  Preconditions unmet - the two realms could not be resolved, or they');
   console.log('  are already at war. Pick another pair.\n');
@@ -176,9 +253,13 @@ console.log(bar('P4  Can a war name carry the title it is fought over?'));
 
 const name = records('probe_name');
 if (name.length === 0) {
-  console.log('\n  No output. This one needs three things, and all three are easy to');
-  console.log('  miss: the probe CB deployed (npm run deploy:mod), CK3 fully restarted,');
-  console.log('  and hd_probe_name.txt run.\n');
+  console.log(cleared
+    ? `\n  No output — but the log was cleared at ${clear.at}, so this may have been`
+      + '\n  erased. If you did run it, re-run with the orchestrator stopped; if you'
+      + '\n  did not, it needs the probe CB deployed and CK3 fully restarted first.\n'
+    : '\n  No output. This one needs three things, and all three are easy to'
+      + '\n  miss: the probe CB deployed (npm run deploy:mod), CK3 fully restarted,'
+      + '\n  and hd_probe_name.txt run.\n');
 } else {
   for (const r of name) console.log(`\n  war ${r[0]}: ${r[1]}`);
   const joined = name.map((r) => r[1] ?? '').join(' ');
@@ -215,8 +296,11 @@ console.log(bar('P5  Do the dispatch reply effects actually land?'));
 
 const reply = records('probe_reply');
 if (reply.length === 0) {
-  console.log('\n  No output. Run hd_probe_reply.txt. It takes real gold and piety from');
-  console.log('  the player, so use a throwaway campaign.\n');
+  console.log(cleared
+    ? `\n  No output — but the log was cleared at ${clear.at}, so this may have been`
+      + '\n  erased rather than never run. Re-run it with the orchestrator stopped.\n'
+    : '\n  No output. Run hd_probe_reply.txt. It takes real gold and piety from'
+      + '\n  the player, so use a throwaway campaign.\n');
 } else if (reply.some((r) => r[0] === 'preconditions_unmet')) {
   console.log('\n  Preconditions unmet - the sender title did not resolve, or it is you.');
   console.log('  Pass a different --anchor and rebuild the probes.\n');
