@@ -179,6 +179,13 @@ setTimeout(() => {
     ['a baseline is captured', /baseline captured at/],
     ['an audit runs', /auditing \d+ across/],
     ['the audit concludes', /(the Director has \d+ proposal|nothing proposed|proposal\(s\) failed validation)/],
+    // The reversed direction: the world having a view about the player, rather
+    // than only being acted upon. The 1218 Andalusian scenario has the player
+    // dominant over four neighbours, so every one of them has something to say
+    // - and if that ever stops being true the whole Dispatches half has gone
+    // quiet without anything failing.
+    ['the neighbours have a view', /\d+ realm\(s\) have something to say to you/],
+    ['and it reaches the player as dispatches', /\d+ dispatch\(es\) awaiting your answer/],
   ];
 
   if (useExe) {

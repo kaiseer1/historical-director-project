@@ -151,7 +151,7 @@ export const REPLIES = {
 
   conciliate: {
     label: 'Send reassurances',
-    summary: `A envoy, warm words and ${CONCILIATE_GOLD} gold. Cools them somewhat.`,
+    summary: `An envoy, warm words and ${CONCILIATE_GOLD} gold. Cools them somewhat.`,
     pressure: -1,
     available: () => null,
     effects: () => [
@@ -275,6 +275,10 @@ export function dispatchFor(ctx) {
     from: from.primaryTitle || from.ruler || `character ${from.id}`,
     ruler: from.ruler ?? '',
     stance: stance.key,
+    // The readable form as well as the key. The sidebar was rendering "Kingdom
+    // of Navarra is at_war", which is the internal name leaking into the one
+    // place in this project that is supposed to read like a person wrote it.
+    stanceLabel: stance.label ?? stance.key,
     posture: stance.posture,
     evidence: stance.evidence ?? [],
     pressure,

@@ -5,6 +5,8 @@ import { assess as assessLiveness, DEFAULT_ACK_MS } from './bridge/Liveness.js';
 import { RunFileManager } from './bridge/RunFileManager.js';
 import { SnapshotAssembler, belligerentName } from './model/WorldState.js';
 import { LoreBook } from './lore/LoreBook.js';
+import { DispatchLedger } from './lore/DispatchLedger.js';
+import { REPLIES, isReply, replyScript, pressureNote } from './director/dispatches.js';
 import { Baseline } from './model/Baseline.js';
 import { AuditClock } from './model/AuditClock.js';
 import { LLMClient } from './llm/client.js';
@@ -73,6 +75,7 @@ if (process.argv.includes('--selftest')) {
 }
 
 const loreBook = new LoreBook(cfg.loreBookPath);
+const dispatchLedger = new DispatchLedger(cfg.dispatchesPath);
 const baseline = new Baseline(cfg.baselinePath);
 const auditClock = new AuditClock(cfg.auditClockPath);
 const runFile = new RunFileManager(cfg.ck3UserFolder);
@@ -110,6 +113,9 @@ const state = {
   snapshot: null,
   /** @type {any[]} */
   proposals: [],
+  /** Letters from the neighbours, awaiting the player's answer. */
+  /** @type {any[]} */
+  dispatches: [],
   /** @type {{token: number, proposal: any} | null} */
   awaitingApply: null,
   busy: false,
@@ -168,6 +174,7 @@ const director = new Director({
   llm,
   loreBook,
   baseline,
+  dispatchLedger,
   knowledge: cfg.knowledge,
   maxProposals: cfg.director.maxProposalsPerAudit,
   maxRealmsInPrompt: cfg.director.maxRealmsInPrompt,
@@ -462,6 +469,14 @@ async function runAudit() {
     }
     const result = await director.audit(state.snapshot, state.sphere.regions);
     state.proposals = result.proposals;
+    // Replaced wholesale rather than merged. A dispatch is what a realm thinks
+    // NOW, and one left over from an audit five years ago is a letter the world
+    // has moved past - the pressure it produced is in the ledger, which is the
+    // part that was meant to persist.
+    state.dispatches = result.dispatches ?? [];
+    if (state.dispatches.length) {
+      log(`${state.dispatches.length} dispatch(es) awaiting your answer`);
+    }
 
     if (result.rejected.length) {
       log(`${result.rejected.length} proposal(s) failed validation and were dropped`);
@@ -481,6 +496,7 @@ async function runAudit() {
     };
 
     broadcast('proposals', { proposals: state.proposals, assessment: result.note });
+    broadcast('dispatches', { dispatches: state.dispatches });
   } catch (err) {
     log(`audit failed: ${err?.message ?? err}`);
   } finally {
@@ -586,6 +602,87 @@ function approve({ id }) {
   broadcast('state', publicState());
   broadcast('proposals', { proposals: state.proposals });
   return { ok: true };
+}
+
+/**
+ * The player answers a neighbour.
+ *
+ * Not an approval, and deliberately not routed through one. `approve` exists
+ * because the Director proposes and the player decides; here the player is
+ * choosing their own move from a fixed set, so the click IS the consent and
+ * there is nothing to approve.
+ *
+ * What keeps that honest is that the set is fixed. Every effect a reply can
+ * have is a constant in dispatches.js, reached by lookup, and the reply key is
+ * checked against that table before anything is composed - so an endpoint
+ * reachable from a browser cannot be talked into staging an effect that is not
+ * in the table, whatever it is handed.
+ *
+ * The ledger is written even when nothing reaches the game, because silence is
+ * the reply whose whole point is that it is remembered.
+ */
+function dispatchReply({ id, reply }) {
+  const d = state.dispatches.find((x) => x.id === id);
+  if (!d) return { error: 'no such dispatch' };
+  if (!isReply(reply)) return { error: `no such reply: ${String(reply).slice(0, 40)}` };
+
+  // Offered to this dispatch, not merely present in the table. The faith and
+  // kin appeals are gated on the map, and an endpoint that accepted one the
+  // sidebar never drew would be a hole straight through that gate.
+  if (!d.replies.some((r) => r.key === reply)) {
+    return { error: `${reply} is not offered on this dispatch: ${d.withheld?.[reply] ?? 'not available'}` };
+  }
+
+  const realm = state.snapshot?.realmsById?.get(d.fromId);
+  if (!realm) return { error: 'that realm is no longer in the snapshot' };
+
+  const ctx = {
+    state: state.snapshot,
+    player: state.snapshot?.player,
+    from: realm,
+    stance: { key: d.stance, posture: d.posture, evidence: d.evidence },
+    pressure: d.pressure,
+  };
+
+  const script = replyScript(reply, ctx, 0);
+
+  // Only a reply with something to stage has to wait its turn. Silence stages
+  // nothing, so holding it behind an in-flight batch would be refusing to
+  // record a decision that never needed the game's help.
+  if (script.length) {
+    const wait = stagedBatchInFlight();
+    if (wait) {
+      log(`reply held: ${wait}`);
+      return { error: wait };
+    }
+    const token = runFile.nextToken();
+    runFile.write(actionScript(replyScript(reply, ctx, token)), token);
+    state.awaitingApply = {
+      token,
+      proposal: { preview: `${REPLIES[reply].label} to ${d.from}`, action: 'dispatch_reply' },
+    };
+    state.pendingSince = Date.now();
+  }
+
+  const after = dispatchLedger.record(realm, reply, {
+    date: state.snapshot?.date ?? '', year: state.year, stance: d.stance,
+  });
+
+  loreBook.record({
+    date: state.snapshot?.date ?? '', year: state.year,
+    verdict: reply === 'ignore' ? 'declined' : 'approved',
+    action: 'dispatch_reply',
+    summary: `${REPLIES[reply].label} to ${d.from} (${d.stance})`,
+    rationale: d.evidence.join('; '),
+    narrative: d.message ?? '',
+  });
+
+  state.dispatches = state.dispatches.filter((x) => x.id !== id);
+  log(`answered ${d.from}: ${REPLIES[reply].label}. Pressure now ${after.pressure} of 3${after.breaking ? " - they will not write again" : ''}`);
+
+  broadcast('state', publicState());
+  broadcast('dispatches', { dispatches: state.dispatches });
+  return { ok: true, pressure: after.pressure, breaking: after.breaking };
 }
 
 function decline({ id }) {
@@ -694,10 +791,19 @@ const llmSettings = createSettingsHandlers(llm, cfg);
 const directorSettings = createDirectorSettings(cfg, director);
 
 const { server, broadcast } = createServer({
-  state: () => ({ state: publicState(), proposals: state.proposals, log: state.log }),
+  // Dispatches belong in the initial fill for the same reason proposals do:
+  // the event stream only carries what happens after a sidebar connects, and
+  // an audit that ran before the page was opened - or before it was refreshed -
+  // would otherwise leave four alarmed neighbours invisible while the log said
+  // they were waiting. Watched happening on 2026-09-12.
+  state: () => ({
+    state: publicState(), proposals: state.proposals, dispatches: state.dispatches, log: state.log,
+  }),
   lorebook: () => ({ entries: loreBook.all() }),
   approve,
   decline,
+  dispatch: dispatchReply,
+  dispatches: () => ({ dispatches: state.dispatches, ledger: dispatchLedger.all() }),
   audit: async () => {
     // An explicit request always audits, whatever the clock says. It is the
     // override for a cadence the player has decided is too slow, and for the

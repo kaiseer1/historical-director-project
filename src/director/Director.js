@@ -4,6 +4,8 @@ import { label, labelList } from './regions.js';
 import { bookmarkBriefing } from './bookmarkTiers.js';
 import { momentBriefing } from './moments.js';
 import { warBriefing } from './historicalWars.js';
+import { dispatches as stancesFor, stanceBriefing } from './stances.js';
+import { dispatchFor, pressureNote } from './dispatches.js';
 import * as wikipedia from '../knowledge/wikipedia.js';
 import * as wikidata from '../knowledge/wikidata.js';
 
@@ -171,7 +173,48 @@ export class Director {
     this.knowledge = deps.knowledge ?? { enabled: true };
     this.maxProposals = deps.maxProposals ?? 2;
     this.maxRealmsInPrompt = deps.maxRealmsInPrompt ?? 40;
+    // What the world remembers about how it has been answered. Optional, so an
+    // orchestrator or a test harness without one still audits - it simply gets
+    // a world with no memory, where every dispatch is a first letter.
+    this.dispatchLedger = deps.dispatchLedger ?? null;
     this.log = deps.log ?? (() => {});
+  }
+
+  /**
+   * The letters the neighbours are sending this audit.
+   *
+   * The stance is decided here, from the map, before the model sees anything.
+   * What the model is asked for is the WORDS - and only for realms this
+   * function already chose. A message naming a realm with no stance is dropped,
+   * for the same reason a proposal naming a character the snapshot never
+   * reported is: the model may write, it may not nominate.
+   *
+   * Pressure is read before it is used, and a succession is noticed first, so a
+   * letter written under a new king goes out at the softened figure rather than
+   * at his father's.
+   *
+   * @param {any} snapshot
+   * @returns {Array<any>} dispatches awaiting prose, strongest feeling first
+   */
+  pendingDispatches(snapshot) {
+    const player = snapshot?.player;
+    if (!player) return [];
+
+    const out = [];
+    for (const { realm, stance } of stancesFor({ state: snapshot, baseline: this.baseline })) {
+      // A death is an opening, and it has to be applied before the letter is
+      // built rather than after it is answered.
+      this.dispatchLedger?.sawRuler?.(realm, snapshot.date ?? '');
+      const pressure = this.dispatchLedger?.pressureOf?.(realm) ?? 0;
+
+      const d = dispatchFor({ state: snapshot, player, from: realm, stance, pressure });
+      // The sentence the consent argument rests on, attached here rather than
+      // composed in the sidebar: what silence costs has to travel with the
+      // dispatch, so it is in the payload a player could inspect and in the
+      // ledger's own reckoning, not only in the markup.
+      if (d) out.push({ ...d, pressureNote: pressureNote(d) });
+    }
+    return out;
   }
 
   /**
@@ -189,7 +232,18 @@ export class Director {
     this.baseline?.observing?.(sphere);
 
     const evidence = await this.retrieve(snapshot, sphere, year);
-    const raw = await this.propose(snapshot, sphere, evidence);
+
+    // Decided from the map, before the model is called, and passed into the
+    // prompt so the same completion that judges the world also gives it a
+    // voice. One call, not two: an audit already costs a retrieval pass and a
+    // paid completion, and the neighbours having something to say is not worth
+    // doubling that.
+    const pending = this.pendingDispatches(snapshot);
+    if (pending.length) {
+      this.log(`${pending.length} realm(s) have something to say to you`);
+    }
+
+    const raw = await this.propose(snapshot, sphere, evidence, pending);
 
     /** @type {any[]} */
     const proposals = [];
@@ -254,7 +308,32 @@ export class Director {
       if (proposals.length >= this.maxProposals) break;
     }
 
-    return { proposals, evidence, rejected, note: raw.assessment ?? '' };
+    // The model wrote words for realms this audit already chose. Anything it
+    // named that we did not is dropped rather than repaired - the same rule a
+    // malformed proposal gets, and for the same reason: a letter from a realm
+    // the map never gave a stance to is the model nominating, not writing.
+    const byId = new Map(pending.map((d) => [d.fromId, d]));
+    /** @type {any[]} */
+    const spoken = [];
+    for (const m of raw.dispatches ?? []) {
+      const d = byId.get(Number(m?.from));
+      if (!d) {
+        rejected.push(`dispatch: no realm with id ${m?.from} has a stance this audit`);
+        continue;
+      }
+      if (d.message) continue; // one letter per realm, first one wins
+      d.message = String(m.message ?? '').slice(0, 700);
+      spoken.push(d);
+    }
+
+    // A realm with a stance and no words still sends its letter. The stance and
+    // its evidence are the substance; the prose is the delivery, and a model
+    // that skipped one must not silence a neighbour the map says is alarmed.
+    for (const d of pending) if (!d.message) d.message = '';
+
+    return {
+      proposals, evidence, rejected, note: raw.assessment ?? '', dispatches: pending,
+    };
   }
 
   /**
@@ -316,7 +395,7 @@ export class Director {
   }
 
   /** Build the prompt and get structured proposals back. */
-  async propose(snapshot, sphere, evidence) {
+  async propose(snapshot, sphere, evidence, pending = []) {
     const system = [
       'You are the Historical Director for a Crusader Kings III campaign.',
       '',
@@ -378,6 +457,14 @@ export class Director {
       'Each proposal carries a narrative: three to five sentences that read as if written from inside the world, weaving the retrieved history together with what is actually happening in this campaign. The Request section below gives you both halves - lore on one side, live state on the other - and the card is where they meet. Name the rulers and realms the snapshot actually reports; do not invent a third thing that is in neither half.',
       'It is prose for the player to read before deciding, and nothing more. No mechanical effect is drawn from it: what an approval does is fixed by the action you named and its parameters, and the narrative cannot add to that, subtract from it, or change it. Write it as an argument for why this moment matters, not as a description of what the button does - the preview already says that, precisely.',
       '',
+      ...(pending.length ? [
+        'THE DISPATCHES.',
+        'Some realms near the player have something to say to them, and the Request section lists which ones, what they feel, and the facts on the map that produced it. Those stances are already decided. You are not being asked whether a realm is alarmed - the map has answered that - you are being asked for the words it sends.',
+        'Write each as a letter from that court to the player: two to four sentences, in the voice of the ruler or their chancellor, at that date. Name the specific things the evidence lines give you - the ground lost, the counties, the faith, the realms that have shrunk - because a letter that could have been sent by anyone to anyone is worse than no letter.',
+        'It is a message, not a demand with mechanics attached: what the player can actually do about it is a fixed set of replies the sidebar offers, and nothing you write changes what those are or what they cost. Do not name a price, do not offer terms, do not threaten a specific war on a specific date.',
+        'Write only for the realms listed. A letter from anyone else is discarded.',
+        '',
+      ] : []),
       'Respond with JSON only, in this shape:',
       '{',
       '  "assessment": "one paragraph on how closely this world tracks the record",',
@@ -391,6 +478,12 @@ export class Director {
       '    "confidence": "high | medium | low",',
       '    "narrative": "3-5 sentences of in-world prose for the sidebar card, half history and half this campaign - see the Request section"',
       '  }]',
+      ...(pending.length ? [
+        '  ,"dispatches": [{',
+        '    "from": <the realm id exactly as the dispatch list gives it>,',
+        '    "message": "2-4 sentences, the letter that court sends the player"',
+        '  }]',
+      ] : []),
       '}',
       `Return at most ${this.maxProposals} proposals.`,
     ].join('\n');
@@ -429,6 +522,15 @@ export class Director {
       ...(wars ? ['## Historical wars on the record', wars, ''] : []),
       ...warSection(snapshot),
       ...vanishedSection(snapshot, this.baseline),
+      ...(pending.length ? [
+        '## Realms with something to say to you',
+        stanceBriefing({ state: snapshot, baseline: this.baseline }),
+        '',
+        'Write a letter for each of these, keyed by the id given:',
+        pending.map((d) => `- id ${d.fromId}: ${d.from} under ${d.ruler}, ${d.stance}`
+          + `${d.breaking ? ' — and this is the last word they will send before they act' : ''}`).join('\n'),
+        '',
+      ] : []),
       '## Retrieved historical evidence',
       evidenceBlock,
       '',
@@ -451,6 +553,7 @@ export class Director {
     return {
       assessment: response?.assessment ?? '',
       proposals: Array.isArray(response?.proposals) ? response.proposals : [],
+      dispatches: Array.isArray(response?.dispatches) ? response.dispatches : [],
     };
   }
 }

@@ -51,6 +51,11 @@ export function loadConfig() {
     errorLogPath: path.join(ck3UserFolder, 'logs', 'error.log'),
     port: raw.port ?? 7842,
     loreBookPath: path.join(ROOT, 'lorebook.json'),
+    // What the world remembers about how it has been answered. Separate from
+    // the Lore Book on purpose: that one is keyed on characters, because an
+    // action is against a person who can die, and this one is keyed on titles,
+    // because a crown's grievance outlives its king.
+    dispatchesPath: path.join(ROOT, 'dispatches.json'),
     baselinePath: path.join(ROOT, 'baseline.json'),
     auditClockPath: path.join(ROOT, 'auditclock.json'),
     llm: {
