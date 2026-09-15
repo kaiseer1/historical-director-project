@@ -329,7 +329,14 @@ tailer.on('record', async (rec) => {
       // `pending` matters as much as `busy`: a staged request that has not
       // been answered yet is an audit already in flight, and the cadence is no
       // longer advanced at request time, so nothing else would stop a second.
-      if (!state.busy && !state.pending) {
+      //
+      // `awaitingApply` is the third, and it was missing. There is one run file
+      // and one pump reading it, so staging a locate on top of an approved
+      // action overwrites it before the game ever sees it - no applied record,
+      // no refused record, and the Lore Book already carrying it as done. That
+      // is the silent loss stagedBatchInFlight exists to prevent on the
+      // approval side, and the heartbeat had its own way in.
+      if (!state.busy && !state.pending && !state.awaitingApply) {
         const due = state.year - state.lastAuditYear >= cfg.director.auditEveryYears;
         const nextDue = state.lastAuditYear + cfg.director.auditEveryYears;
 

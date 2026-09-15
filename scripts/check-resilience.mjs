@@ -303,7 +303,7 @@ function scratchTailer() {
   const ten = applyPumpInterval(runner, 10);
   check(
     'P2. a configured interval reaches the widget',
-    ten.applied && /duration = 10/.test(ten.text) && !/duration = 2/.test(ten.text),
+    ten.applied && /duration = 10/.test(ten.text) && !/duration = 2\b/.test(ten.text),
     ten.applied ? 'duration = 10' : 'marker did not match',
   );
 
