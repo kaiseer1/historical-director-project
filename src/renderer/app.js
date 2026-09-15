@@ -397,6 +397,8 @@ function renderWorld() {
       'Its modifiers, its event chain and the union decision all live in the companion mod, so the whole action is withheld rather than partly applied.'],
     [s.config?.moment, 'The historical moment library is unavailable.',
       'Its events and modifiers live in the companion mod, so moments are withheld entirely rather than staged with half their effects.'],
+    [s.config?.dynamic, "The Director's own dynamic event is unavailable.",
+      'hd_dynamic.0001 lives in the companion mod, and an older game would take the effects attached to an occasion while the occasion itself never happened.'],
   ];
   for (const [feature, headline, consequence] of gated) {
     if (!feature || feature.ok) continue;
@@ -422,7 +424,7 @@ function renderWorld() {
       const macro = s.config?.macro;
       const version = mom?.version ?? macro?.version;
       if (!version) return mom?.checked ? 'not deployed' : 'unverified';
-      const stale = [!mom?.ok && 'momentum', !macro?.ok && 'macro events', !s.config?.moment?.ok && 'historical moments'].filter(Boolean);
+      const stale = [!mom?.ok && 'momentum', !macro?.ok && 'macro events', !s.config?.moment?.ok && 'historical moments', !s.config?.dynamic?.ok && 'dynamic events'].filter(Boolean);
       return stale.length ? `v${version} (too old for ${stale.join(' and ')})` : `v${version}`;
     })()],
     ['Model', s.config?.model ?? '-'],

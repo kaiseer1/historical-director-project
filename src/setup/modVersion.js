@@ -251,3 +251,25 @@ export function warSupport(ck3UserFolder) {
     'the casus belli, modifiers and events they use',
   );
 }
+
+/**
+ * The mod version that first carried the generic dynamic event:
+ * hd_dynamic.0001 and the localization keys it selects between.
+ *
+ * Gated like the war library and for the same class of reason. A mod without
+ * the event definition does not refuse `trigger_event = hd_dynamic.0001`; it
+ * logs one line to error.log and carries on, so the gold and the prestige
+ * attached to the occasion would land while the occasion itself never
+ * happened. The batch would report ok, because the batch did run.
+ */
+export const DYNAMIC_MIN_MOD = '0.11.0';
+
+/** @param {string} ck3UserFolder */
+export function dynamicSupport(ck3UserFolder) {
+  return featureSupport(
+    ck3UserFolder,
+    DYNAMIC_MIN_MOD,
+    'the dynamic event',
+    'hd_dynamic.0001 and the localization it selects between',
+  );
+}

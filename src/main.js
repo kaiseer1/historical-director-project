@@ -24,12 +24,13 @@ import { preflight, problemCount } from './setup/preflight.js';
 // Two similarly named things, kept apart on purpose: modVersion's resolves the
 // answer by reading the deployed descriptor, momentum's reports the answer the
 // toolkit is currently acting on.
-import { momentumSupport as resolveMomentumSupport, macroSupport as resolveMacroSupport, momentSupport as resolveMomentSupport, collapseSupport as resolveCollapseSupport, warSupport as resolveWarSupport, logClearSupport as resolveLogClearSupport, setObservedModVersion, observedModVersion } from './setup/modVersion.js';
+import { momentumSupport as resolveMomentumSupport, macroSupport as resolveMacroSupport, momentSupport as resolveMomentSupport, collapseSupport as resolveCollapseSupport, warSupport as resolveWarSupport, dynamicSupport as resolveDynamicSupport, logClearSupport as resolveLogClearSupport, setObservedModVersion, observedModVersion } from './setup/modVersion.js';
 import { setMomentumSupport, momentumSupport as momentumSupportState } from './director/momentum.js';
 import { setMacroSupport, macroSupport as macroSupportState } from './director/macroEvents.js';
 import { setMomentSupport, momentSupport as momentSupportState } from './director/moments.js';
 import { setCollapseSupport, collapseSupport as collapseSupportState } from './director/almohadCollapse.js';
 import { setWarSupport, warSupport as warSupportState, warTitles } from './director/historicalWars.js';
+import { setDynamicSupport, dynamicSupport as dynamicSupportState } from './director/dynamicEvents.js';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -397,6 +398,18 @@ tailer.on('record', async (rec) => {
       log(`the game acknowledged the log-clear request (slot ${out.slot})`);
       break;
 
+    case 'dynamicScope':
+      // Logged rather than acted on. It answers, once and for good, whether a
+      // scope saved in a run file reaches an event fired from that same batch -
+      // which decides whether the dynamic event may ever name a second party
+      // in game. Written down here so the answer is in the activity log the
+      // first time anyone approves one, instead of waiting for someone to go
+      // looking in debug.log.
+      log(out.kept
+        ? 'hd_dynamic.0001 kept the scope the run file saved, so the event named the other party'
+        : 'hd_dynamic.0001 did NOT keep the scope the run file saved, so it showed the plainer wording. Batch-saved scopes do not survive into a triggered event.');
+      break;
+
     case 'eventFired':
       // Remembered so the applied line that follows can say whether the event
       // really fired. An event blocked by its own trigger does nothing at all,
@@ -409,11 +422,24 @@ tailer.on('record', async (rec) => {
       // Only the confirmation for the batch we are actually waiting on counts.
       if (!state.awaitingApply || String(state.awaitingApply.token) !== String(out.token)) break;
 
-      if (out.action === 'trigger_event') {
+      // Both event actions land the same way and fail the same way, so they
+      // are reported together. The dynamic one carries effects as well as a
+      // scene, which is why its failure line says what did still happen.
+      if (out.action === 'trigger_event' || out.action === 'trigger_dynamic_event') {
         const fired = state.lastEventFired && Date.now() - state.lastEventFired.at < 30_000;
-        log(fired
-          ? `the game confirmed ${state.lastEventFired.event} reached the ruler`
-          : 'the batch ran, but the event did not fire: its own trigger was not met, so nothing reached the ruler');
+        if (fired) {
+          log(`the game confirmed ${state.lastEventFired.event} reached the ruler`);
+        } else if (out.action === 'trigger_dynamic_event') {
+          // A different diagnosis from the curated events, because this one has
+          // no trigger of its own to fail. Silence here means the running game
+          // has no definition for hd_dynamic.0001 - a mod older than v0.11.0,
+          // or one deployed but not yet loaded - and the effects attached to
+          // the occasion have landed anyway, which the player is owed.
+          log('the batch ran and any gold, prestige or piety landed, but hd_dynamic.0001 never fired.');
+          log('  the running game has no definition for it: deploy the companion mod and restart CK3.');
+        } else {
+          log('the batch ran, but the event did not fire: its own trigger was not met, so nothing reached the ruler');
+        }
         state.lastEventFired = null;
       } else if (out.action === 'historical_war') {
         // Which of the two outcomes the batch saw: the named war running, or
@@ -731,6 +757,11 @@ function warState() {
   return { ok: m.ok, version: m.version, reason: m.reason, checked: m.checked };
 }
 
+function dynamicState() {
+  const m = dynamicSupportState();
+  return { ok: m.ok, version: m.version, reason: m.reason, checked: m.checked };
+}
+
 function publicState() {
   return {
     connected: state.connected,
@@ -770,6 +801,7 @@ function publicState() {
       moment: momentState(),
       collapse: collapseState(),
       war: warState(),
+      dynamic: dynamicState(),
       sphereMax: cfg.director.sphereMax,
       maxRealmsInPrompt: cfg.director.maxRealmsInPrompt,
       knowledge: cfg.knowledge.enabled,
@@ -993,14 +1025,17 @@ function checkModCapabilities() {
   const war = resolveWarSupport(cfg.ck3UserFolder);
   setWarSupport(war);
 
+  const dynamic = resolveDynamicSupport(cfg.ck3UserFolder);
+  setDynamicSupport(dynamic);
+
   // Not handed to a module the way the others are: nothing in the toolkit
   // depends on it, because clearing the log is maintenance and never touches
   // game state. It only decides whether asking is worth doing.
   state.logClear = resolveLogClearSupport(cfg.ck3UserFolder);
 
-  const version = mom.version ?? macro.version ?? moment.version ?? collapse.version ?? war.version;
-  if (mom.ok && macro.ok && moment.ok && collapse.ok && war.ok) {
-    log(`companion mod v${version} deployed; momentum, macro events, the moment library, the Almohad collapse and historical wars available`);
+  const version = mom.version ?? macro.version ?? moment.version ?? collapse.version ?? war.version ?? dynamic.version;
+  if (mom.ok && macro.ok && moment.ok && collapse.ok && war.ok && dynamic.ok) {
+    log(`companion mod v${version} deployed; momentum, macro events, the moment library, the Almohad collapse, historical wars and the dynamic event available`);
   } else {
     if (version) log(`companion mod v${version} deployed`);
     if (!mom.ok) log(`momentum unavailable: ${mom.reason}`);
@@ -1008,9 +1043,10 @@ function checkModCapabilities() {
     if (!moment.ok) log(`historical moments unavailable: ${moment.reason}`);
     if (!collapse.ok) log(`the Almohad collapse is unavailable: ${collapse.reason}`);
     if (!war.ok) log(`historical wars are unavailable: ${war.reason}`);
+    if (!dynamic.ok) log(`the dynamic event is unavailable: ${dynamic.reason}`);
     if (!state.logClear.ok) log(`log clearing unavailable: ${state.logClear.reason}. CK3 can stop logging after as little as 17MB in a session; a long campaign will need a restart.`);
   }
-  return { momentum: mom, macro, moment, collapse, war };
+  return { momentum: mom, macro, moment, collapse, war, dynamic };
 }
 
 /**

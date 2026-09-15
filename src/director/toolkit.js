@@ -21,6 +21,7 @@ import { INTENSITY, INTENSITY_KEYS, MAX_PARTNERS, intensityBand, iberianPressure
 import { MOMENTS, MOMENT_KEYS, isMoment, inWindow, windowError, momentScript, momentPreview, momentSupport, targetTierError } from './moments.js';
 import { SEVERITY, SEVERITY_KEYS, MAX_CLAIMANTS, COLLAPSE_YEAR, COLLAPSE_SPAN, collapseBand, almohadCollapseScript, inWindow as inCollapseWindow, collapseSupport } from './almohadCollapse.js';
 import { WARS, WAR_KEYS, isWar, warWindowError, warModError, warParties, warPreview, warScript, warSupport, curatedWarConflict } from './historicalWars.js';
+import { DYNAMIC, DYNAMIC_KEYS, EFFECT_CAP, isDynamicKind, dynamicScript, dynamicPreview, dynamicSupport, readEffects } from './dynamicEvents.js';
 
 /** Characters CK3 script treats structurally. Never let these through. */
 const UNSAFE = /["'{}\[\]$\\=#\r\n\t]/g;
@@ -42,6 +43,33 @@ function safeInt(v) {
 /** CK3 identifiers: event ids and the like. */
 function safeIdent(v) {
   return String(v ?? '').replace(/[^A-Za-z0-9_.]/g, '').slice(0, 64);
+}
+
+/**
+ * Prose the model wrote for a player to read, as opposed to a value the game
+ * will execute.
+ *
+ * Deliberately NOT safeString. That one strips apostrophes, quotation marks and
+ * brackets because it is composing script, and running a sentence through it
+ * returns something a person would notice: "the taifas ruler s plea". This is
+ * the other half of the same rule - a string that can never reach the run file
+ * does not need the script characters taken out of it, and taking them out
+ * damages the only thing it is for.
+ *
+ * What is removed is what breaks a display or a log line rather than a parser:
+ * control characters, and newlines, which would split one ledger entry into
+ * several. The sidebar inserts every model string as textContent, so there is
+ * no markup path to close either.
+ *
+ * @param {unknown} v
+ * @param {number} maxLen
+ */
+function safeProse(v, maxLen) {
+  return String(v ?? '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    .slice(0, maxLen);
 }
 
 /**
@@ -1237,6 +1265,121 @@ export const TOOLKIT = {
         'trigger_event',
         token,
       )],
+  },
+
+  trigger_dynamic_event: {
+    signature: 'trigger_dynamic_event',
+    description:
+      "Stage the Director's own event for an occasion nobody wrote in advance. The curated events above are scenes from the record; this is the general one, for a divergence that matters and has no scene of its own. You supply the argument - a title and a paragraph - and choose which of four occasions the game should show, and the event reaches the named ruler with whatever prestige, gold or piety you attach to it. It grants no claim, transfers no title and starts no war. Note what the game can and cannot render: your title and paragraph are shown to the PLAYER in the Director's own card, which is what they read before approving, while the event window in game shows the wording the mod already carries for the occasion you picked. CK3 cannot be handed a sentence at runtime, so do not write your paragraph as though the recipient will be reading it.",
+    parameters: {
+      type: 'object',
+      properties: {
+        actor: { type: 'integer', description: 'Character id from the snapshot who receives the event' },
+        kind: {
+          type: 'string',
+          enum: DYNAMIC_KEYS,
+          description: `Which occasion the game shows. ${DYNAMIC_KEYS.map((k) => `"${k}": ${DYNAMIC[k].use}`).join('. ')}.`,
+        },
+        title: {
+          type: 'string',
+          description: 'A headline for the Director\'s card, in the register of a chronicle entry rather than a news bulletin. Shown to the player, never to the ruler in game.',
+        },
+        description: {
+          type: 'string',
+          description: 'One paragraph for the Director\'s card: what has diverged, what the record says instead, and why this ruler is the one it is being put to. Shown to the player, never to the ruler in game.',
+        },
+        other: {
+          type: 'integer',
+          description:
+            'Optional. Character id from the snapshot the occasion is ABOUT, as distinct from the one receiving it - the present holder of the disputed ground, the distant lord, the ruler whose succession is in question. Where the game can name them it will.',
+        },
+        effects: {
+          type: 'object',
+          description: `Optional. What the recipient gains or loses, each at most ${EFFECT_CAP} in either direction. Omit it where the occasion is news rather than a windfall, which is most of the time.`,
+          properties: {
+            gold: { type: 'integer' },
+            prestige: { type: 'integer' },
+            piety: { type: 'integer' },
+          },
+          additionalProperties: false,
+        },
+      },
+      required: ['actor', 'kind', 'title', 'description'],
+      additionalProperties: false,
+    },
+    validate(a, state) {
+      const actor = safeInt(a.actor);
+      if (actor === null || !state.realmsById.has(actor)) return `actor ${a.actor} is not a ruler in the snapshot`;
+
+      if (!isDynamicKind(a.kind)) {
+        return `kind "${safeString(a.kind, 40)}" is not one of ${DYNAMIC_KEYS.join(', ')}`;
+      }
+
+      // Refused here rather than in toScript, for the reason momentum's gate
+      // gives: the preview is what the player approves, and a preview
+      // describing an event the deployed mod has no definition for is the
+      // sidebar lying about what approval will do. The batch would still say
+      // "ok", because the batch would still run - and the effects would land
+      // without the scene they were attached to.
+      const mod = dynamicSupport();
+      if (!mod.ok) return `the dynamic event cannot be executed: ${mod.reason}`;
+
+      // The argument is the action here. An empty one is not a thin proposal,
+      // it is an event with nothing to say fired at a ruler for no stated
+      // reason, and the player would have nothing to judge.
+      if (!safeProse(a.title, 120)) return 'title is empty';
+      if (safeProse(a.description, 900).length < 40) {
+        return 'description is too short to be an argument; say what has diverged, what the record says instead, and why this ruler';
+      }
+
+      if (given(a.other)) {
+        const other = safeInt(a.other);
+        if (other === null || !state.realmsById.has(other)) return `other ${a.other} is not a ruler in the snapshot`;
+        if (other === actor) return 'actor and other are the same character; omit other where the occasion is about the recipient themselves';
+      }
+
+      const effects = readEffects(a.effects);
+      if (!effects.ok) return effects.error;
+
+      // One party or two, the same rule the rest of the toolkit uses: the
+      // Director watches a wide sphere and acts in a narrow one. An event is
+      // not a war, but it is still the Director reaching into a court.
+      const parties = [actor, ...(given(a.other) ? [safeInt(a.other)] : [])];
+      return requireLocality(state, parties, 'trigger_dynamic_event');
+    },
+    preview(a, state) {
+      const actor = state.realmsById.get(safeInt(a.actor));
+      const other = given(a.other) ? state.realmsById.get(safeInt(a.other)) : null;
+      const effects = readEffects(a.effects).effects ?? {};
+
+      // The model's own words lead, because they are the proposal. Everything
+      // after them is this module saying what the game will actually do, which
+      // is the part the player cannot get anywhere else.
+      return `"${safeProse(a.title, 120)}" — ${safeProse(a.description, 900)} `
+        + dynamicPreview(String(a.kind), actor?.ruler ?? String(a.actor), other?.ruler ?? null, effects)
+        + distanceNote(state, [safeInt(a.actor), ...(given(a.other) ? [safeInt(a.other)] : [])]);
+    },
+    toScript: (a, token, state) => {
+      const otherTag = given(a.other) ? tagOf(state, safeInt(a.other)) : null;
+      const effects = readEffects(a.effects).effects ?? {};
+
+      return [
+        ...resolveTagged(tagOf(state, safeInt(a.actor)), 'hd_dyn_actor'),
+        ...(otherTag === null ? [] : resolveTagged(otherTag, 'hd_dyn_other')),
+        ...guarded(
+          // `is_alive` as well as `exists`, which the older actions do not ask
+          // and probably should. Tags are assigned at snapshot time and stay
+          // valid until the next sweep, so a ruler who died in between is
+          // still in the list and still resolves - `exists` is true for a dead
+          // character. Adding a modifier to a corpse is invisible; sending one
+          // an event is not.
+          'exists = scope:hd_dyn_actor\n\t\tscope:hd_dyn_actor = { is_alive = yes }',
+          dynamicScript(a.kind, 'scope:hd_dyn_actor', effects),
+          'trigger_dynamic_event',
+          token,
+        ),
+      ];
+    },
   },
 };
 

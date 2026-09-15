@@ -231,6 +231,14 @@ export class SnapshotAssembler {
         // from the batch that fired it and would appear either way.
         return { type: 'eventFired', event: rec.fields[0] };
 
+      case 'dynamic_scope':
+        // hd_dynamic.0001 reporting whether a scope saved by the run file
+        // survived into the event fired from that same batch. An open question
+        // the mod answers by observation rather than one we go on reasoning
+        // about: "kept" means the fuller description was shown and the other
+        // party was named, "lost" means the plainer one was.
+        return { type: 'dynamicScope', kept: rec.fields[0] === 'kept' };
+
       case 'refused':
         // The batch ran but the action's precondition was false, so nothing
         // changed in the game. Distinct from silence, which means the batch

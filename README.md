@@ -48,7 +48,7 @@ drawn from a fixed toolkit — which run only if you approve them.
 **The AI directs. You decide.** That single constraint is what makes the rest of it safe: the
 hallucination problem has a human arbiter, and the latency problem has a player who consented to wait.
 
-## Status: v0.10.0 — a testing alpha
+## Status: v0.11.0 — a testing alpha
 
 ### Watched working in a live game
 
@@ -85,7 +85,8 @@ them happen in CK3 yet.
 | Perception | Regional world-state snapshots: rulers, titles, tiers, footprint, culture, faith, government, wars, and the holders of the titles the historical wars are fought over |
 | Sphere of influence | Seeded from where the player rules — capital *and* realm footprint — then grown as far outward as you set it |
 | Knowledge layer | Wikipedia lead extracts, era-filtered, plus Wikidata reign intervals and dynasty spans |
-| Toolkit | `spawn_character` (optionally born into a named house and carrying a pressed claim), `set_relations`, `grant_claim`, `adjust_title_tier`, `trigger_event`, `iberian_pressure`, `almohad_collapse`, `historical_moment`, `historical_war` |
+| Toolkit | `spawn_character` (optionally born into a named house and carrying a pressed claim), `set_relations`, `grant_claim`, `adjust_title_tier`, `trigger_event`, `trigger_dynamic_event`, `iberian_pressure`, `almohad_collapse`, `historical_moment`, `historical_war` |
+| **Dynamic events** | `trigger_dynamic_event` stages one generic event for occasions nobody wrote in advance. The model supplies the argument and picks one of four occasions; the player reads its words on the card, and the game shows the mod's own wording for that occasion with the people in it named live. CK3 cannot be handed a sentence at runtime — event text is a localization key, a key can be chosen but not supplied, and the 1.19 binary has no localization reload — so the card is where arbitrary prose goes, and the preview says so |
 | **Historical wars** | `historical_war` — the one action that starts a war. A curated war the record names, near its date, under its own casus belli and historical name: *The Conquest of Majorca* (1229), *The Conquest of Córdoba* (1236), *The Conquest of Seville* (1248) and *The Albigensian Crusade* (1226). CK3 fights it; five-year modifiers tilt it toward the record's outcome without deciding it; a pressed claim is its justification and its fallback. Refused outside its window, when the land is already the attacker's, or when the attacker is not free to declare |
 | Historical moments | Curated turning points — the Iberian crowns drawing together, the Almohads coming apart — each with its own event, claim, means and date window |
 | Macro events | `iberian_pressure` sets a regional process running across a unifier and up to four partners; `almohad_collapse` takes a power apart from the inside, with vassals raising independence factions. Both are bounded by the live map, so a world that will not support them refuses them |

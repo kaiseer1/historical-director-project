@@ -139,3 +139,30 @@
  hd_event.0237.t:0 "The King Comes South"
  hd_event.0237.desc:0 "The crusaders of Montfort's day came and went, and Toulouse outlasted them; the city even killed Montfort himself, with a stone from a mangonel its own women were working. But this is no baron's army. The crown of France is marching, and the towns along its road are opening their gates before it arrives.\n\nToulouse has survived every crusade so far by waiting for the crusaders to go home. A king does not go home."
  hd_event.0237.a:0 "Then Toulouse will wait behind its walls."
+
+ # --- The generic Director event, hd_dynamic.0001 ---------------------------
+ #
+ # Four occasions, each with a version that names the other party and a version
+ # that does not. The pair exists because the named version depends on a scope
+ # saved by the run file surviving into an event fired from that same batch,
+ # which nobody has yet watched happen. See mod/events/hd_dynamic_events.txt.
+ #
+ # The model's own words are not here and cannot be: these are the skeletons,
+ # and the paragraph the Director actually wrote for this occasion is in the
+ # sidebar card the player read before approving it.
+
+ hd_dynamic.0001.t.historical_justice:0 "A Claim the Record Remembers"
+ hd_dynamic.0001.desc.historical_justice_named:0 "The clerks have been working through documents older than the arrangement currently in force, and they have found what they were sent to find. Whatever [scope:hd_dyn_other.GetTitledFirstNameNicknamedNoTooltipRegnal] holds today, it was not always held from there, and the men who wrote it down are dead but their hand is legible.\n\nA case of this kind is not a war and does not become one by itself. It is a door left unlocked. Whether anyone walks through it is a separate decision, taken later, by whoever is standing nearest."
+ hd_dynamic.0001.desc.historical_justice:0 "The clerks have been working through documents older than the arrangement currently in force, and they have found what they were sent to find. The ground in question was not always held as it is held now, and the men who wrote it down are dead but their hand is legible.\n\nA case of this kind is not a war and does not become one by itself. It is a door left unlocked. Whether anyone walks through it is a separate decision, taken later, by whoever is standing nearest."
+
+ hd_dynamic.0001.t.foreign_holding:0 "A Banner That Does Not Belong"
+ hd_dynamic.0001.desc.foreign_holding_named:0 "The banner over the castle is not one anyone here grew up reading. [scope:hd_dyn_other.GetTitledFirstNameNicknamedNoTooltipRegnal] rules from a court so far off that the orders arrive late and the taxes arrive later, and the garrison speaks to the countryside through interpreters.\n\nNothing about it is illegal. That is rather the trouble: it was acquired properly, it is held properly, and every year it is held the map looks less like the country it is drawn over."
+ hd_dynamic.0001.desc.foreign_holding:0 "The banner over the castle is not one anyone here grew up reading. It answers to a court far enough off that the orders arrive late and the taxes arrive later, and the garrison speaks to the countryside through interpreters.\n\nNothing about it is illegal. That is rather the trouble: it was acquired properly, it is held properly, and every year it is held the map looks less like the country it is drawn over."
+
+ hd_dynamic.0001.t.succession:0 "The Succession Is Spoken Of"
+ hd_dynamic.0001.desc.succession_named:0 "Nobody has died, and the whole court is discussing what happens when somebody does. The question is what [scope:hd_dyn_other.GetTitledFirstNameNicknamedNoTooltipRegnal] leaves behind, and to whom, and in what order - and the answers being offered in the corridors do not agree with one another or with the law.\n\nDisputes of this kind are decided twice. Once by the lawyers, at length, and once by whoever is under arms when the lawyers finish."
+ hd_dynamic.0001.desc.succession:0 "Nobody has died, and the whole court is discussing what happens when somebody does. The question is what is left behind, and to whom, and in what order - and the answers being offered in the corridors do not agree with one another or with the law.\n\nDisputes of this kind are decided twice. Once by the lawyers, at length, and once by whoever is under arms when the lawyers finish."
+
+ hd_dynamic.0001.t.notice:0 "The Chronicler Sets Down a Page"
+ hd_dynamic.0001.desc.notice:0 "The Director's chronicler has been writing all season, and this morning the page was left where it would be read. It concerns this court, and the country around it, and the distance between what is happening here and what was supposed to happen here.\n\nThe argument itself, and what was done about it, are in the Director's ledger."
+ hd_dynamic.0001.a:0 "Let it be noted."
