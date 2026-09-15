@@ -444,6 +444,30 @@ function renderWorld() {
   if (s.sphere?.note && s.sphere.home?.length) {
     host.appendChild(el('p', 'muted', s.sphere.note));
   }
+
+  // Who the Director is watching, and why.
+  //
+  // Shown because it is the one thing the Director does on its own initiative
+  // between audits: it can interrupt its own cadence on the strength of this
+  // list, and a player who cannot see the list has no way to know why an audit
+  // arrived early. The reason beside each name is the model's own note to
+  // itself, kept verbatim.
+  const watch = s.watchlist?.entries ?? [];
+  if (watch.length) {
+    host.appendChild(el('h3', null, 'Watched between audits'));
+    host.appendChild(el('p', 'muted',
+      'The Director asks after these rulers once a game year, at a cost of a few log lines and no completion.'
+      + ' A death, a lost primary title, or a change of faith or culture brings the next audit forward.'));
+    const ul = document.createElement('ul');
+    for (const w of watch) {
+      const li = document.createElement('li');
+      li.appendChild(el('strong', null, `${w.ruler}${w.primaryTitle ? ` of ${w.primaryTitle}` : ''}`));
+      if (w.retired) li.appendChild(el('span', 'muted', ' — gone; the next audit will say what followed'));
+      if (w.why) li.appendChild(el('p', 'muted', w.why));
+      ul.appendChild(li);
+    }
+    host.appendChild(ul);
+  }
 }
 
 async function loadLedger() {

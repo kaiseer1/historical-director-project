@@ -9,6 +9,7 @@ import { DispatchLedger } from './lore/DispatchLedger.js';
 import { REPLIES, isReply, replyScript, pressureNote } from './director/dispatches.js';
 import { Baseline } from './model/Baseline.js';
 import { AuditClock } from './model/AuditClock.js';
+import { Watchlist, describeDivergences } from './model/Watchlist.js';
 import { LLMClient } from './llm/client.js';
 import { Director } from './director/Director.js';
 import { seedSphere } from './director/sphere.js';
@@ -17,7 +18,7 @@ import { label, labelList, PROBE_REGIONS, supportedRegions } from './director/re
 import { createServer } from './server.js';
 import { createSettingsHandlers } from './llmSettings.js';
 import { createDirectorSettings } from './directorSettings.js';
-import { locateScript, snapshotScript, actionScript } from './bridge/ck3Script.js';
+import { locateScript, snapshotScript, watchScript, actionScript } from './bridge/ck3Script.js';
 import { isPackaged, describeRuntime, listAssets } from './runtime.js';
 import { deployMod } from './setup/deployMod.js';
 import { preflight, problemCount } from './setup/preflight.js';
@@ -79,6 +80,7 @@ const loreBook = new LoreBook(cfg.loreBookPath);
 const dispatchLedger = new DispatchLedger(cfg.dispatchesPath);
 const baseline = new Baseline(cfg.baselinePath);
 const auditClock = new AuditClock(cfg.auditClockPath);
+const watchlist = new Watchlist(cfg.watchlistPath);
 const runFile = new RunFileManager(cfg.ck3UserFolder);
 const tailer = new LogTailer(cfg.debugLogPath, { errorLogPath: cfg.errorLogPath });
 
@@ -130,8 +132,21 @@ const state = {
    */
   reorienting: false,
   /** Which request we are waiting on, so duplicate answers are ignored. */
-  /** @type {'locate'|'snapshot'|null} */
+  /** @type {'locate'|'snapshot'|'watch'|null} */
   pending: null,
+  /** When the watchlist was last asked after, in game years. */
+  lastWatchYear: -Infinity,
+  /**
+   * Why this audit is running early, when it is.
+   *
+   * Set by a watchlist divergence and cleared once the audit that it caused has
+   * been attempted. It reaches the prompt, so a divergence audit opens with the
+   * thing that woke it rather than with the same general question the clock
+   * asks.
+   *
+   * @type {{at: string, divergences: any[]} | null}
+   */
+  divergence: null,
   /** When that request was staged, for working out whether the pump is dead. */
   pendingSince: 0,
   /**
@@ -233,6 +248,35 @@ function requestSnapshot(regions, homeRegions, nearRegions) {
   log(`requested a snapshot of ${labelList(regions)}`);
 }
 
+/**
+ * Ask after the watchlist, if there is one and it is time.
+ *
+ * Deliberately cheap and deliberately not an audit. The probe resolves the
+ * saved tags of at most five rulers and emits one line each, against a
+ * snapshot's several thousand, which is what lets it run every game year. It
+ * costs no completion and no retrieval: what it buys is latency.
+ *
+ * Nothing is staged while anything else is in flight. The caller has already
+ * checked, and the check is repeated here because this is reachable from more
+ * than one place and overwriting a staged batch is the one failure this design
+ * cannot afford.
+ */
+function maybeWatch() {
+  if (!cfg.director.divergenceAudits) return;
+  if (state.pending || state.busy || state.awaitingApply) return;
+
+  const entries = watchlist.probeable();
+  if (entries.length === 0) return;
+  if (state.year - state.lastWatchYear < cfg.director.watchEveryYears) return;
+
+  state.lastWatchYear = state.year;
+  state.pending = 'watch';
+  state.pendingSince = Date.now();
+  const token = runFile.nextToken();
+  runFile.write(watchScript(entries, token), token);
+  log(`asking after ${entries.length} watched ruler(s): ${entries.map((e) => e.ruler).join(', ')}`);
+}
+
 // --------------------------------------------------------------------------
 // The loop
 // --------------------------------------------------------------------------
@@ -293,6 +337,13 @@ tailer.on('record', async (rec) => {
           state.reorienting = false;
           log(`${state.year}: audit due`);
           requestLocate();
+        } else if (state.divergence) {
+          // Something on the watchlist moved and the clock has not caught up.
+          // The audit is the same audit; what changes is that the prompt opens
+          // with the death rather than with the map.
+          state.reorienting = false;
+          log(`${state.year}: auditing early - ${describeDivergences(state.divergence.divergences)}`);
+          requestLocate();
         } else if (!reorientedThisRun) {
           // One free look per run. The orchestrator has just started and knows
           // nothing about the world; the snapshot costs nothing but a run-file
@@ -302,6 +353,8 @@ tailer.on('record', async (rec) => {
           state.reorienting = true;
           log(`${state.year}: re-orienting after a restart. Last audit ${state.lastAuditYear}, next due ${nextDue}; taking a snapshot without auditing`);
           requestLocate();
+        } else {
+          maybeWatch();
         }
       }
       break;
@@ -345,6 +398,33 @@ tailer.on('record', async (rec) => {
       break;
     }
 
+    case 'watch': {
+      if (state.pending !== 'watch') break;
+      state.pending = null;
+      runFile.clear();
+
+      const { divergences, unobserved } = watchlist.applyProbe(out.watch.reports, out.watch.date || state.date || '');
+
+      // Said out loud, because it is the honest half of the answer. A watched
+      // ruler the game did not report on is one the list has lost its handle on
+      // - the sweep that gave them a tag has been replaced, or the list entry
+      // is gone - and that is not the same as nothing having happened to them.
+      if (unobserved.length) {
+        log(`${unobserved.length} watched ruler(s) were not reported on: ${unobserved.map((e) => e.ruler).join(', ')}. Not a finding - the next snapshot re-points the list at them.`);
+      }
+
+      if (divergences.length === 0) break;
+
+      for (const d of divergences) log(`watchlist: ${d.what}`);
+      // Held rather than acted on directly. The heartbeat is what stages
+      // requests, and routing every trigger through it keeps one place deciding
+      // whether the bridge is free.
+      state.divergence = { at: out.watch.date || state.date || '', divergences };
+      state.banner = null;
+      broadcast('state', publicState());
+      break;
+    }
+
     case 'snapshot': {
       if (state.pending !== 'snapshot') break;
       state.pending = null;
@@ -365,6 +445,19 @@ tailer.on('record', async (rec) => {
       // audit measures drift against.
       // The sphere goes in with it: county counts are only comparable across
       // audits that looked through the same window or a wider one.
+      // The free half of the divergence check. A snapshot re-describes every
+      // realm in the sphere, so it answers everything the probe asks and more -
+      // and it is also the only thing that can re-point the list's tags, which
+      // the sweep it just ran has invalidated.
+      if (watchlist.reconcile(out.snapshot.totalDays)) {
+        log('this campaign predates the recorded watchlist; the Director is no longer watching anyone');
+      }
+      const watched = watchlist.refresh(out.snapshot);
+      for (const d of watched.divergences) log(`watchlist: ${d.what}`);
+      if (watched.divergences.length && !state.divergence) {
+        state.divergence = { at: out.snapshot.date, divergences: watched.divergences };
+      }
+
       const captured = baseline.offer(out.snapshot, state.sphere.regions);
       if (captured === 'captured') {
         log(`baseline captured at ${out.snapshot.date}: this is the map drift is measured from`);
@@ -498,6 +591,8 @@ async function runAudit() {
       // question is about who holds land where the player does; the sphere is
       // merely what the Director can see.
       home: [...state.sphere.home, ...state.sphere.footprint],
+      // Why this audit is running early, when it is. Null for a scheduled one.
+      divergence: state.divergence,
     });
     state.proposals = result.proposals;
     // Replaced wholesale rather than merged. A dispatch is what a realm thinks
@@ -517,6 +612,23 @@ async function runAudit() {
       ? `the Director has ${result.proposals.length} proposal(s) for your judgement`
       : 'the Director finds this world on track; nothing proposed');
 
+    // Who the Director will be watching until the next audit says otherwise.
+    //
+    // An audit that nominated nobody leaves the list alone rather than emptying
+    // it. A model that simply did not answer that part of the prompt is not the
+    // same thing as a model saying the world is no longer worth watching, and
+    // treating it as such would quietly disable the divergence trigger for the
+    // rest of the campaign.
+    if (result.watchlist?.length) {
+      const adopted = watchlist.adopt(result.watchlist, state.snapshot, cfg.director.watchlistMax);
+      for (const r of adopted.rejected) log(`  dropped: ${r}`);
+      if (adopted.kept.length) {
+        log(`watching until the next audit: ${adopted.kept.map((e) => `${e.ruler} of ${e.primaryTitle}`).join(', ')}`);
+      }
+    } else if (watchlist.size) {
+      watchlist.sweepRetired();
+    }
+
     state.lastAudit = {
       date: state.snapshot?.date ?? '',
       outcome: result.proposals.length
@@ -531,6 +643,11 @@ async function runAudit() {
   } catch (err) {
     log(`audit failed: ${err?.message ?? err}`);
   } finally {
+    // Cleared whether the audit succeeded or not. A divergence that survived a
+    // failed audit would re-trigger on the next heartbeat and go on doing so,
+    // and a death reported once is enough: the watchlist has already recorded
+    // the new state, so nothing is lost but the repetition.
+    state.divergence = null;
     state.busy = false;
     broadcast('state', publicState());
   }
@@ -792,6 +909,13 @@ function publicState() {
     },
     lastRefusal: state.lastRefusal ?? null,
     lastAudit: state.lastAudit,
+    watchlist: {
+      entries: watchlist.all().map((e) => ({
+        ruler: e.ruler, primaryTitle: e.primaryTitle, why: e.why, since: e.since, retired: Boolean(e.retired),
+      })),
+      lastChecked: Number.isFinite(state.lastWatchYear) ? state.lastWatchYear : null,
+      pending: Boolean(state.divergence),
+    },
     config: {
       // Read from the live client, not the loaded config: these can be changed
       // from the settings panel, and the World tab would otherwise go on

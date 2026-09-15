@@ -294,7 +294,7 @@ export class Director {
       this.log(`${pending.length} realm(s) have something to say to you`);
     }
 
-    const raw = await this.propose(snapshot, sphere, evidence, pending, { home });
+    const raw = await this.propose(snapshot, sphere, evidence, pending, { home, divergence });
 
     /** @type {any[]} */
     const proposals = [];
@@ -382,8 +382,14 @@ export class Director {
     // that skipped one must not silence a neighbour the map says is alarmed.
     for (const d of pending) if (!d.message) d.message = '';
 
+    // Who to keep an eye on until the next audit. Validated in Watchlist
+    // against this same snapshot, not here, because the list has to outlive
+    // this call and the thing that persists it is the thing that should decide
+    // what it is willing to store.
+    const watched = Array.isArray(raw.watchlist) ? raw.watchlist.slice(0, 8) : [];
+
     return {
-      proposals, evidence, rejected, note: raw.assessment ?? '', dispatches: pending,
+      proposals, evidence, rejected, note: raw.assessment ?? '', dispatches: pending, watchlist: watched,
     };
   }
 
@@ -486,6 +492,7 @@ export class Director {
   /** Build the prompt and get structured proposals back. */
   async propose(snapshot, sphere, evidence, pending = [], opts = {}) {
     const home = opts.home?.length ? opts.home : sphere;
+    const divergence = opts.divergence ?? null;
     const borders = borderGoreBriefing({ state: snapshot, home });
 
     const system = [
@@ -569,6 +576,17 @@ export class Director {
         'Write only for the realms listed. A letter from anyone else is discarded.',
         '',
       ] : []),
+      'NAME WHO IS WORTH WATCHING BETWEEN AUDITS.',
+      'Audits are years apart, because each one costs a retrieval pass and a completion. Some history does not wait that long: a king dies at the wrong moment and the next five years are decided before anyone looks again. So every audit also nominates three to five rulers from the table whose death, loss of their primary title, or change of faith or culture should bring the Director back early.',
+      'Choose the load-bearing ones. A ruler whose survival the next thirty years of this region visibly depend on, a realm whose collapse would rearrange the map, a succession the record says is about to be contested. Not the largest realms by reflex, and not the player.',
+      'Give the id exactly as the table gives it, and one sentence on why that person. The sentence is shown to the player and handed back to you if the watch fires, so write it as a note to your future self: what you expect to happen to them, and what it would mean if it did.',
+      '',
+      ...(divergence ? [
+        'THIS AUDIT WAS WOKEN EARLY.',
+        'Something on the watchlist moved before the clock came round, and the Request section says what. That is the question in front of you: what does the record say follows from it, and does the live map now need something it did not need last year? Audit the rest of the world as usual, but lead with this.',
+        'Do not assume the change is bad. A ruler dying on time is the record being followed, not broken, and the right answer may be that the world is doing exactly what it should.',
+        '',
+      ] : []),
       'Respond with JSON only, in this shape:',
       '{',
       '  "assessment": "one paragraph on how closely this world tracks the record",',
@@ -588,6 +606,10 @@ export class Director {
         '    "message": "2-4 sentences, the letter that court sends the player"',
         '  }]',
       ] : []),
+      '  ,"watchlist": [{',
+      '    "id": <a realm id exactly as the table gives it>,',
+      '    "why": "one sentence: what you expect to happen to them, and what it would mean"',
+      '  }]',
       '}',
       `Return at most ${this.maxProposals} proposals.`,
     ].join('\n');
@@ -635,6 +657,12 @@ export class Director {
           + `${d.breaking ? ' — and this is the last word they will send before they act' : ''}`).join('\n'),
         '',
       ] : []),
+      ...(divergence ? [
+        '## Why this audit is running early',
+        `Reported by the game on ${divergence.at}. These are the people this Director asked to be told about, and what the game says has happened to them:`,
+        ...divergence.divergences.map((d) => `- ${d.what}${d.why ? ` — watched since ${d.since || 'an earlier audit'} because: ${d.why}` : ''}`),
+        '',
+      ] : []),
       ...(borders ? ['## Holdings on the player\'s own ground, held from elsewhere', borders, ''] : []),
       ...windowSection(evidence),
       '## Retrieved historical evidence',
@@ -660,6 +688,7 @@ export class Director {
       assessment: response?.assessment ?? '',
       proposals: Array.isArray(response?.proposals) ? response.proposals : [],
       dispatches: Array.isArray(response?.dispatches) ? response.dispatches : [],
+      watchlist: Array.isArray(response?.watchlist) ? response.watchlist : [],
     };
   }
 }

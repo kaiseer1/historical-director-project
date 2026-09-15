@@ -58,6 +58,10 @@ export function loadConfig() {
     dispatchesPath: path.join(ROOT, 'dispatches.json'),
     baselinePath: path.join(ROOT, 'baseline.json'),
     auditClockPath: path.join(ROOT, 'auditclock.json'),
+    // Who the Director is keeping an eye on between audits. Separate from both
+    // of the above because it is neither a judgement nor a grievance: it is a
+    // list of people whose deaths are worth interrupting the cadence for.
+    watchlistPath: path.join(ROOT, 'watchlist.json'),
     llm: {
       baseUrl: llm.baseUrl ?? 'https://api.deepseek.com',
       model: llm.model ?? 'deepseek-chat',
@@ -118,6 +122,23 @@ export function loadConfig() {
       // log subsystem itself looks exhausted. Longer than the one above,
       // because it is diagnosing a slower and more expensive thing.
       stallMinutes: raw.director?.stallMinutes ?? 2,
+      // How many in-game years between checks on the watchlist, and how many
+      // people may be on it.
+      //
+      // The check is deliberately not an audit. It resolves a handful of saved
+      // tags and emits one line each - five log lines against a snapshot's
+      // several thousand - so it can afford to run every year where an audit
+      // cannot. What it buys is the difference between hearing that Harold is
+      // dead in 1071, at the next scheduled audit, and hearing it in 1066.
+      watchEveryYears: raw.director?.watchEveryYears ?? 1,
+      // Five is the cap the prompt asks for. It is a cap and not a target: a
+      // watchlist of twenty would cost little to probe and a great deal to
+      // read, and a divergence audit fires on any one of them.
+      watchlistMax: raw.director?.watchlistMax ?? 5,
+      // Whether a watchlist divergence may interrupt the audit cadence at all.
+      // On by default; the whole point of the list is that some events should
+      // not wait five years to be noticed.
+      divergenceAudits: raw.director?.divergenceAudits !== false,
     },
     knowledge: {
       enabled: raw.knowledge?.enabled !== false,

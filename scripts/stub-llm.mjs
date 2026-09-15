@@ -12,6 +12,7 @@ import http from 'node:http';
 const bad = process.argv.includes('--bad');
 const andalusMode = process.argv.includes('--andalus');
 const momentumMode = process.argv.includes('--momentum');
+const dynamicMode = process.argv.includes('--dynamic');
 
 const good = {
   assessment:
@@ -78,6 +79,44 @@ const momentum = {
   ],
 };
 
+// The 1071 Anatolian case. Pairs with `simulate-game.mjs --anatolia`, and
+// exercises the three v0.11 paths at once: an ahistorical holding found by the
+// seat probe, the dynamic event carrying the model's own argument to the card,
+// and a watchlist that makes the next death interrupt the cadence.
+const dynamic = {
+  assessment:
+    'Anatolia in 1071 is recognisable but for one thing: a French king holds the Duchy of Anatolia from a court the sweep cannot even find, which is not a different outcome of the eleventh century so much as a different eleventh century. Manzikert is weeks away and neither party is positioned for it.',
+  proposals: [
+    {
+      action: 'trigger_dynamic_event',
+      args: {
+        actor: 5001,
+        kind: 'historical_justice',
+        title: 'A Duchy Held From Beyond the Map',
+        description:
+          'The game gives the Duchy of Anatolia to Philippe I of France, ruled from a court so distant the survey cannot place it. No French king held ground in Anatolia in this century; the Byzantine themes were lost to the Seljuks, not to the Capetians, and the record has Romanos IV marching east this very summer to recover them.',
+        other: 5003,
+        effects: { prestige: 150 },
+      },
+      headline: 'A French duchy in Anatolia',
+      divergence:
+        'Philippe I holds nine counties in Anatolia and the Duchy of Anatolia with them, from a seat outside the observed sphere. The record has this ground contested between the Byzantines and the Seljuks throughout the 1070s and nobody else.',
+      historical_context:
+        'Anatolia in 1071 was Byzantine territory under increasing Seljuk pressure. Romanos IV Diogenes marched east in the summer of that year and was defeated and captured at Manzikert on 26 August, after which the Byzantine position in the interior collapsed. No western European ruler held territory in Anatolia before the First Crusade, and the Latin principalities that followed were founded after 1098.',
+      consequences:
+        "Romanos IV receives the Director's event and 150 prestige. Nothing is claimed, nothing is transferred, and no war begins: this puts the argument in front of the player and the ground in front of the court.",
+      confidence: 'high',
+      narrative:
+        'The clerks have been at the archive since Lent, and what they have produced is not a grievance but an inventory. Anatolia has been held from Constantinople since before there was a Constantinople to hold it from, and the banner over the Duchy is one no scribe in the city can read. The Sultan is moving east of Lake Van and the themes that should be meeting him answer to Paris.',
+    },
+  ],
+  watchlist: [
+    { id: 5002, why: 'Alp Arslan is the Seljuk advance. If he dies before Manzikert the whole eastern question changes shape.' },
+    { id: 5003, why: 'The French holding rests on one man; his death is when the duchy either fragments or is inherited by somebody nearer.' },
+    { id: 5005, why: "Armenia is the buffer. Its collapse is the record's own signal that Anatolia is open." },
+  ],
+};
+
 const badResponse = {
   assessment: 'Testing validation.',
   proposals: [
@@ -95,7 +134,13 @@ http
     req.on('data', (c) => (body += c));
     req.on('end', () => {
       console.log(`[stub] ${req.method} ${req.url} (${body.length} bytes of prompt)`);
-      const payload = JSON.stringify(bad ? badResponse : momentumMode ? momentum : andalusMode ? andalus : good);
+      const payload = JSON.stringify(
+        bad ? badResponse
+          : dynamicMode ? dynamic
+            : momentumMode ? momentum
+              : andalusMode ? andalus
+                : good,
+      );
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(
         JSON.stringify({
@@ -104,4 +149,4 @@ http
       );
     });
   })
-  .listen(7999, '127.0.0.1', () => console.log(`[stub] pretending to be a model on :7999 (${bad ? 'malformed' : momentumMode ? 'momentum' : andalusMode ? 'andalus' : 'well-formed'} output)`));
+  .listen(7999, '127.0.0.1', () => console.log(`[stub] pretending to be a model on :7999 (${bad ? 'malformed' : dynamicMode ? 'dynamic event' : momentumMode ? 'momentum' : andalusMode ? 'andalus' : 'well-formed'} output)`));

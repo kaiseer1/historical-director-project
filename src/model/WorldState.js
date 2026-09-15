@@ -16,6 +16,8 @@ export class SnapshotAssembler {
     this.pending = null;
     /** @type {{id: number, capital: string, culture: string, faith: string, title: string, tier: string, date: string, regions: string[]} | null} */
     this.pendingLocation = null;
+    /** @type {{token: string, date: string, reports: any[]} | null} */
+    this.pendingWatch = null;
   }
 
   /**
@@ -155,6 +157,37 @@ export class SnapshotAssembler {
         this.pending = null;
         if (snap.token !== rec.fields[0]) return null; // interleaved or stale
         return { type: 'snapshot', snapshot: finalise(snap) };
+      }
+
+      case 'watch_begin':
+        this.pendingWatch = { token: rec.fields[0], date: rec.fields[1] ?? '', reports: [] };
+        return null;
+
+      case 'watch': {
+        if (!this.pendingWatch) return null;
+        const tag = Number(rec.fields[0]);
+        if (!Number.isFinite(tag)) return null;
+        const alive = rec.fields[1] === 'alive';
+        this.pendingWatch.reports.push({
+          tag,
+          alive,
+          id: Number(rec.fields[2]) || 0,
+          // Only meaningful on the alive branch; the script does not emit them
+          // for a dead character, and an absent field must read as "not asked"
+          // rather than as a change.
+          primaryTitle: alive ? (rec.fields[3] ?? '') : '',
+          culture: alive ? (rec.fields[4] ?? '') : '',
+          faith: alive ? (rec.fields[5] ?? '') : '',
+        });
+        return null;
+      }
+
+      case 'watch_end': {
+        if (!this.pendingWatch) return null;
+        const report = this.pendingWatch;
+        this.pendingWatch = null;
+        if (report.token !== rec.fields[0]) return null; // interleaved or stale
+        return { type: 'watch', watch: report };
       }
 
       case 'locate_begin':

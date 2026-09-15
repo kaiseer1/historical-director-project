@@ -35,7 +35,7 @@ import { deployMod } from '../src/setup/deployMod.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
-const scenario = args.find((a) => ['--andalus', '--byzantium', '--iberia'].includes(a)) ?? '--iberia';
+const scenario = args.find((a) => ['--andalus', '--byzantium', '--iberia', '--anatolia'].includes(a)) ?? '--iberia';
 const keep = args.includes('--keep');
 
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'hd-smoke-'));
@@ -99,9 +99,13 @@ if (useExe) requireBuilt(EXE, 'npm run build:exe');
 
 const momentumMode = args.includes('--momentum');
 const restartMode = args.includes('--restart');
-const stubArgs = momentumMode ? ['--momentum'] : scenario === '--andalus' ? ['--andalus'] : [];
+// The v0.11 leg. The fake game reports the first watched ruler as dead, which
+// is the only way to make the divergence trigger fire inside a smoke run: a
+// real campaign obliges eventually and a thirty-second test cannot wait.
+const dynamicMode = args.includes('--dynamic');
+const stubArgs = dynamicMode ? ['--dynamic'] : momentumMode ? ['--momentum'] : scenario === '--andalus' ? ['--andalus'] : [];
 const stub = start('stub', ['scripts/stub-llm.mjs', ...stubArgs]);
-const sim = start('sim', ['scripts/simulate-game.mjs', scenario, '--log', LOG]);
+const sim = start('sim', ['scripts/simulate-game.mjs', scenario, '--log', LOG, ...(dynamicMode ? ['--kill-watched'] : [])]);
 
 // The executable is its own interpreter, so it is spawned directly rather than
 // handed to node. --no-browser because a test that opens a browser window every
@@ -124,7 +128,7 @@ for (const kid of [stub, sim]) {
 
 // The restart leg needs the first run to audit, then a second process against
 // the same HD_HOME to prove it does not.
-const SECONDS = restartMode ? 40 : momentumMode ? 32 : 22;
+const SECONDS = restartMode ? 40 : momentumMode ? 32 : dynamicMode ? 34 : 22;
 
 if (restartMode) {
   setTimeout(() => {
@@ -144,7 +148,7 @@ console.log(`running ${scenario.slice(2)}${momentumMode ? ' +momentum' : ''} for
 // nothing at all about whether a verdict reaches the game. With --momentum the
 // proposal carries pre-authored effects, so this is also the only end-to-end
 // check that those survive validation, approval and script composition.
-if (momentumMode) {
+if (momentumMode || dynamicMode) {
   setTimeout(async () => {
     try {
       const state = await fetch(`http://127.0.0.1:${PORT}/api/state`, {
@@ -220,6 +224,22 @@ setTimeout(() => {
     checks.push(['and the momentum effects with it', /batch carries:.*add_character_modifier/]);
     checks.push(['nothing in it starts a war', (out) => !/batch carries:.*start_war/.test(out)]);
     checks.push(['the game confirms it took effect', /the game confirmed grant_claim took effect/]);
+  }
+
+  if (dynamicMode) {
+    // Feature by feature, in the order the loop reaches them.
+    checks.push(['a dynamic event survives validation', /the Director has [1-9]\d* proposal/]);
+    checks.push(["the card carries the model's own words", /A Duchy Held From Beyond the Map/]);
+    checks.push(['and says where they will not appear', /CK3 cannot be handed a sentence at runtime/]);
+    checks.push(['the verdict reaches the game', /approved: "A Duchy Held From Beyond the Map"/]);
+    checks.push(['the batch carries the effect', /batch carries:.*add_prestige/]);
+    checks.push(['nothing in it starts a war', (out) => !/batch carries:.*start_war/.test(out)]);
+    checks.push(['the game confirms the event reached the ruler', /confirmed hd_dynamic\.0001 reached the ruler/]);
+    checks.push(['and the event answers the open scope question', /hd_dynamic\.0001 (kept|did NOT keep) the scope/]);
+    checks.push(['the Director adopts a watchlist', /watching until the next audit:/]);
+    checks.push(['asks after them between audits', /asking after \d+ watched ruler/]);
+    checks.push(['notices a death', /watchlist: .* is dead/]);
+    checks.push(['and audits early because of it', /woken early by the watchlist|auditing early -/]);
   }
 
   if (scenario === '--andalus' && !momentumMode) {

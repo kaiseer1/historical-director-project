@@ -373,6 +373,61 @@ export function snapshotScript(regions, token, homeRegions = [], nearRegions = [
 }
 
 /**
+ * Ask after a handful of named rulers, and nothing else.
+ *
+ * The cheap half of the divergence trigger. A snapshot re-describes every realm
+ * in the sphere and costs thousands of log lines; this asks five questions and
+ * costs five, which is what makes it affordable once a year where an audit is
+ * affordable once a decade. It is the difference between learning that Harold
+ * is dead in 1066 and learning it at the next scheduled audit in 1071.
+ *
+ * Addressed by tag, like every other action, because CK3 cannot resolve
+ * `character:34497` for a ruler generated at runtime. Tags are assigned by the
+ * last sweep and the global list outlives it, which is precisely what this
+ * relies on - and also why Watchlist.refresh has to re-derive them after every
+ * snapshot.
+ *
+ * The alive test is a branch rather than a field. A dead character's
+ * `GetPrimaryTitle` has nothing to return and CK3 answers an unresolvable data
+ * function with the literal text `ERROR:[...]`, which would arrive looking
+ * exactly like a title named ERROR - a fact rather than a gap. Asking first
+ * costs one `if` and removes the whole class.
+ *
+ * @param {Array<{tag: number}>} entries
+ * @param {number} token
+ * @returns {string[]}
+ */
+export function watchScript(entries, token) {
+  const probes = entries
+    .filter((e) => Number.isInteger(e.tag))
+    .flatMap((e) => [
+      'every_in_global_list = {',
+      '\tvariable = hd_realm_set',
+      `\tlimit = { var:hd_tag = ${e.tag} }`,
+      '\tif = {',
+      '\t\tlimit = { is_alive = yes }',
+      `\t\tdebug_log = "HD:/;/watch/;/${e.tag}/;/alive/;/[THIS.Char.GetID]`
+        + '/;/[THIS.Char.GetPrimaryTitle.GetNameNoTooltip]'
+        + '/;/[THIS.Char.GetCulture.GetName]/;/[THIS.Char.GetFaith.GetName]"',
+      '\t}',
+      '\telse = {',
+      `\t\tdebug_log = "HD:/;/watch/;/${e.tag}/;/dead/;/[THIS.Char.GetID]"`,
+      '\t}',
+      '}',
+    ]);
+
+  // Bracketed like a snapshot so a truncated answer is discarded rather than
+  // half-read. A watch report missing two of its five lines would otherwise
+  // report two people as unobserved, and unobserved is a state this design
+  // takes seriously enough not to invent.
+  return [
+    `debug_log = "HD:/;/watch_begin/;/${token}/;/[GetCurrentDate.GetStringShort]"`,
+    ...probes,
+    `debug_log = "HD:/;/watch_end/;/${token}"`,
+  ];
+}
+
+/**
  * Find a tagged realm and save it under a scope name.
  *
  * Tags are assigned in sweep order, and realm records reach the orchestrator in
