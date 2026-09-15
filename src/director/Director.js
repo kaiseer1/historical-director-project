@@ -6,6 +6,7 @@ import { momentBriefing } from './moments.js';
 import { warBriefing } from './historicalWars.js';
 import { dispatches as stancesFor, stanceBriefing } from './stances.js';
 import { dispatchFor, pressureNote } from './dispatches.js';
+import { borderGoreBriefing } from './borderGore.js';
 import * as wikipedia from '../knowledge/wikipedia.js';
 import * as wikidata from '../knowledge/wikidata.js';
 
@@ -262,22 +263,26 @@ export class Director {
   /**
    * @param {any} snapshot
    * @param {string[]} sphere region ids
-   * @param {{home?: string[]}} [opts]
+   * @param {{home?: string[], divergence?: {at: string, divergences: any[]}|null}} [opts]
    *   `home` is the ground the player actually rules, which is a narrower thing
    *   than the sphere and the only ground the border question is asked about.
+   *   `divergence` is set when the watchlist woke this audit early.
    * @returns {Promise<{proposals: any[], evidence: any, rejected: string[], note: string}>}
    */
   async audit(snapshot, sphere, opts = {}) {
     const year = snapshot.year;
     const home = opts.home?.length ? opts.home : sphere;
-    this.log(`auditing ${year} across ${labelList(sphere)} (${snapshot.realms.length} realms)`);
+    const divergence = opts.divergence ?? null;
+    this.log(divergence
+      ? `auditing ${year} across ${labelList(sphere)} (${snapshot.realms.length} realms), woken early by the watchlist`
+      : `auditing ${year} across ${labelList(sphere)} (${snapshot.realms.length} realms)`);
 
     // Before anything reads a delta. The footprint and disappearance signals
     // are only sound when this window contains the one the baseline was taken
     // through, and this is how the baseline finds that out.
     this.baseline?.observing?.(sphere);
 
-    const evidence = await this.retrieve(snapshot, sphere, year, { home });
+    const evidence = await this.retrieve(snapshot, sphere, year, { home, divergence });
 
     // Decided from the map, before the model is called, and passed into the
     // prompt so the same completion that judges the world also gives it a
@@ -289,7 +294,7 @@ export class Director {
       this.log(`${pending.length} realm(s) have something to say to you`);
     }
 
-    const raw = await this.propose(snapshot, sphere, evidence, pending);
+    const raw = await this.propose(snapshot, sphere, evidence, pending, { home });
 
     /** @type {any[]} */
     const proposals = [];
@@ -479,7 +484,10 @@ export class Director {
   }
 
   /** Build the prompt and get structured proposals back. */
-  async propose(snapshot, sphere, evidence, pending = []) {
+  async propose(snapshot, sphere, evidence, pending = [], opts = {}) {
+    const home = opts.home?.length ? opts.home : sphere;
+    const borders = borderGoreBriefing({ state: snapshot, home });
+
     const system = [
       'You are the Historical Director for a Crusader Kings III campaign.',
       '',
@@ -532,6 +540,10 @@ export class Director {
       'THE RECORD HAS EVENTS IN IT, NOT ONLY CONDITIONS.',
       'One retrieval pass below is keyed to this decade and this place rather than to these dynasties: it asks what the record has happening in the ten years around the current date, here. Read it against the live snapshot in both directions. If the record has a battle, a succession or a collapse in this window and the map shows no sign of it, that is a divergence worth naming. If the map contradicts the outcome of something the record says has just happened, that is the same thing from the other side.',
       'Absence in that section is not evidence of a quiet decade. It says which queries were issued; if they came back empty, say so in the assessment rather than treating a quiet retrieval as a quiet century.',
+      '',
+      'A HOLDING CAN BE WRONG IN A WAY A BORDER IS NOT.',
+      'The section below on holdings lists rulers who hold ground on the player\'s own soil while being seated somewhere else - a court that does not border the land it rules, or one outside the observed sphere entirely. Judge each one: is a polity of this kind, holding this ground, from that distance, something this century recognises? A conquest that the record itself carries is not a divergence, and neither is a marcher lord on a frontier - those are listed separately and were already set aside. What you are looking for is authority in a shape the period has no place for.',
+      'There is no revocation in this toolkit and there will not be. You cannot revoke a title from a ruler who is not your vassal, in this game or in the century, and an action that quietly transferred a title from one ruler to another would be the Director playing rather than directing. The remedy is the one the period used: give the claim to whoever the record says should hold it with grant_claim, and stage trigger_dynamic_event with kind "historical_justice" so the claim arrives as an argument somebody is making rather than as a gift from nowhere. Name in the consequences field that this starts nothing by itself.',
       '',
       'THE DYNAMIC EVENT IS FOR OCCASIONS NOBODY WROTE IN ADVANCE.',
       'trigger_dynamic_event stages the Director\'s own event and carries your own title and paragraph to the player. Use it where something is worth putting in front of them and no curated moment or war fits - and be clear about where your words go. The player reads them on the card. The ruler in the game sees the mod\'s own wording for the occasion you chose, because CK3 cannot be handed a sentence at runtime, so do not write your paragraph as a letter to the recipient.',
@@ -623,6 +635,7 @@ export class Director {
           + `${d.breaking ? ' — and this is the last word they will send before they act' : ''}`).join('\n'),
         '',
       ] : []),
+      ...(borders ? ['## Holdings on the player\'s own ground, held from elsewhere', borders, ''] : []),
       ...windowSection(evidence),
       '## Retrieved historical evidence',
       evidenceBlock,

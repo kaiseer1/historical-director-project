@@ -261,6 +261,58 @@ export function snapshotScript(regions, token, homeRegions = [], nearRegions = [
     '\t}',
   ]);
 
+  // Where the realm is RULED FROM, as against where it holds land.
+  //
+  // The sweep has always been able to say that a realm holds counties in
+  // Anatolia. It could never say that the man holding them sits in Paris, and
+  // those are the two halves of the only question border gore actually asks.
+  // Culture was the nearest available proxy and it is a bad one, for the reason
+  // written up in toolkit.js: culture records where a dynasty came from, not
+  // where its land is.
+  //
+  // Same test the player's own locate probe uses, run over each realm in the
+  // sweep instead. Emitted once per realm per matching region, keyed on
+  // character id like every other secondary record, so a truncated log costs
+  // one realm its seat rather than shifting a seat onto the wrong ruler.
+  //
+  // A realm reporting no seat at all is seated outside the swept sphere, which
+  // is a fact and not a gap - but only once you know the probe ran. Absence is
+  // read at the other end against whether ANY realm reported one; see
+  // borderGore.js on why that distinction is the whole feature.
+  const seatEmit = ordered.flatMap((r) => [
+    '\tif = {',
+    `\t\tlimit = { capital_county.title_province ?= { geographical_region = ${r} } }`,
+    `\t\tdebug_log = "HD:/;/realm_capital/;/[THIS.Char.GetID]/;/${r}"`,
+    '\t}',
+  ]);
+
+  // The major titles themselves, so a holding can be named rather than
+  // inferred from a county count.
+  //
+  // Duchy and kingdom tier only, and personally held only - `every_held_title`
+  // returns what this character holds, not what their vassals hold under them.
+  // That is a real limit and it cuts the right way round: the vassal case still
+  // shows up as counties and a distant seat, while this one names the title the
+  // player would see on the map. "A French king holds the Duchy of Anatolia" is
+  // a sentence the Director could not previously write.
+  //
+  // Title.GetHolder and Title.GetNameNoTooltip are both vanilla data functions
+  // (138 and 111 uses in the shipped English localization, checked 2026-09-15),
+  // and the holder is read off the title rather than carried down from the
+  // enclosing scope because a `scope:` reference does not resolve inside a
+  // debug_log run from a batch file. That lesson is at the top of this file.
+  const titleEmit = ['duchy', 'kingdom'].flatMap((t) => [
+    '\tevery_held_title = {',
+    `\t\tlimit = { tier = tier_${t} }`,
+    ...ordered.flatMap((r) => [
+      '\t\tif = {',
+      `\t\t\tlimit = { title_capital_county.title_province ?= { geographical_region = ${r} } }`,
+      `\t\t\tdebug_log = "HD:/;/realm_title/;/[THIS.Title.GetHolder.GetID]/;/${r}/;/${t}/;/[THIS.Title.GetNameNoTooltip]"`,
+      '\t\t}',
+    ]),
+    '\t}',
+  ]);
+
   return [
     'clear_global_variable_list = hd_realm_set',
     `debug_log = "HD:/;/snapshot_begin/;/${token}/;/[GetCurrentDate.GetStringShort]/;/[GetCurrentDate.GetDateAsTotalDays]/;/[GetPlayer.GetID]"`,
@@ -272,6 +324,8 @@ export function snapshotScript(regions, token, homeRegions = [], nearRegions = [
     '\tset_variable = { name = hd_tag value = global_var:hd_idx }',
     `\t${emit}`,
     ...tierEmit,
+    ...seatEmit,
+    ...titleEmit,
     '\tif = {',
     '\t\tlimit = { has_variable = hd_home }',
     '\t\tdebug_log = "HD:/;/realm_home/;/[THIS.Char.GetID]"',

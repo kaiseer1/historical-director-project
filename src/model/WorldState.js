@@ -33,6 +33,10 @@ export class SnapshotAssembler {
           realms: [],
           /** @type {Map<number, string[]>} filled before the realms exist */
           regionsById: new Map(),
+          /** @type {Map<number, string[]>} which region each realm is ruled from */
+          capitalById: new Map(),
+          /** @type {Map<number, Array<{name: string, region: string, tierKey: string|null}>>} */
+          titlesById: new Map(),
           /** @type {Map<number, {id: number, attacker: number, defender: number, name: string}>} */
           warsById: new Map(),
           /** @type {Map<string, {holder: number|null, top: number|null}>} */
@@ -86,6 +90,38 @@ export class SnapshotAssembler {
         const id = Number(rec.fields[0]);
         const target = this.pending.realms.find((r) => r.id === id);
         if (target) target.tierKey = rec.fields[1] || null;
+        return null;
+      }
+
+      case 'realm_capital': {
+        // Which region this realm is ruled FROM. Buffered by character id like
+        // realm_in_region, and for the same reason: the realm lines and these
+        // arrive from the same pass, but keying on the id means a lost record
+        // costs one realm its seat rather than shifting every later seat by one.
+        if (!this.pending) return null;
+        const capId = Number(rec.fields[0]);
+        if (!Number.isFinite(capId) || !rec.fields[1]) return null;
+        if (!this.pending.capitalById.has(capId)) this.pending.capitalById.set(capId, []);
+        const seats = this.pending.capitalById.get(capId);
+        if (!seats.includes(rec.fields[1])) seats.push(rec.fields[1]);
+        return null;
+      }
+
+      case 'realm_title': {
+        // A duchy- or kingdom-tier title this realm's ruler holds personally,
+        // and the region its capital county sits in. The one record that lets a
+        // holding be named instead of counted.
+        if (!this.pending) return null;
+        const holder = Number(rec.fields[0]);
+        const region = rec.fields[1];
+        const tier = rec.fields[2];
+        const name = rec.fields[3];
+        if (!Number.isFinite(holder) || !region || !name) return null;
+        if (!this.pending.titlesById.has(holder)) this.pending.titlesById.set(holder, []);
+        const held = this.pending.titlesById.get(holder);
+        if (!held.some((t) => t.name === name && t.region === region)) {
+          held.push({ name, region, tierKey: tier || null });
+        }
         return null;
       }
 
@@ -318,12 +354,34 @@ function finalise(snap) {
     const realm = realmsById.get(id);
     if (realm) realm.regions = regions;
   }
+
+  // Seats and major titles, attached the same way and for the same reason.
+  for (const [id, seats] of snap.capitalById ?? new Map()) {
+    const realm = realmsById.get(id);
+    if (realm) realm.capitalRegions = seats;
+  }
+  for (const [id, held] of snap.titlesById ?? new Map()) {
+    const realm = realmsById.get(id);
+    if (realm) realm.majorTitles = held;
+  }
+
+  // Did the seat probe run at all?
+  //
+  // One realm with no seat means it is ruled from outside the swept sphere.
+  // EVERY realm with no seat means nobody asked - an orchestrator older than
+  // the probe, or a log truncated before those records - and reading that as
+  // "they are all foreigners" would turn a gap into a verdict. The player's own
+  // capital is inside their own sphere by construction, so a snapshot where the
+  // probe ran always has at least one seat in it.
+  const seated = [...realmsById.values()].some((r) => (r.capitalRegions ?? []).length > 0);
   const year = Number(String(snap.date).match(/\d{3,4}/)?.[0]) || 0;
   const byFootprint = [...snap.realms].sort((a, b) => b.countiesInSphere - a.countiesInSphere);
   return {
     ...snap,
     year,
     realmsById,
+    /** Whether any realm reported a seat, so absence can be told from silence. */
+    seatsObserved: seated,
     player: realmsById.get(snap.playerId) ?? null,
     /** Largest realms first: drift shows up at the top of the table. */
     byFootprint,

@@ -493,7 +493,12 @@ async function runAudit() {
       log(`no API key set, so no audit. Set ${cfg.llm.apiKeyEnv ?? 'HD_API_KEY'} in your environment, or paste one into the sidebar's Settings tab.`);
       return;
     }
-    const result = await director.audit(state.snapshot, state.sphere.regions);
+    const result = await director.audit(state.snapshot, state.sphere.regions, {
+      // The player's own ground, as against the whole sphere. The border-gore
+      // question is about who holds land where the player does; the sphere is
+      // merely what the Director can see.
+      home: [...state.sphere.home, ...state.sphere.footprint],
+    });
     state.proposals = result.proposals;
     // Replaced wholesale rather than merged. A dispatch is what a realm thinks
     // NOW, and one left over from an audit five years ago is a letter the world
