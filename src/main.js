@@ -1,12 +1,15 @@
 import { loadConfig, describeConfig } from './config.js';
 import { LogTailer } from './bridge/LogTailer.js';
 import { LogBudget, clearGapMs } from './bridge/LogBudget.js';
-import { assess as assessLiveness } from './bridge/Liveness.js';
+import { assess as assessLiveness, DEFAULT_ACK_MS } from './bridge/Liveness.js';
 import { RunFileManager } from './bridge/RunFileManager.js';
 import { SnapshotAssembler, belligerentName } from './model/WorldState.js';
 import { LoreBook } from './lore/LoreBook.js';
+import { DispatchLedger } from './lore/DispatchLedger.js';
+import { REPLIES, isReply, replyScript, pressureNote } from './director/dispatches.js';
 import { Baseline } from './model/Baseline.js';
 import { AuditClock } from './model/AuditClock.js';
+import { Watchlist, describeDivergences } from './model/Watchlist.js';
 import { LLMClient } from './llm/client.js';
 import { Director } from './director/Director.js';
 import { seedSphere } from './director/sphere.js';
@@ -15,19 +18,20 @@ import { label, labelList, PROBE_REGIONS, supportedRegions } from './director/re
 import { createServer } from './server.js';
 import { createSettingsHandlers } from './llmSettings.js';
 import { createDirectorSettings } from './directorSettings.js';
-import { locateScript, snapshotScript, actionScript } from './bridge/ck3Script.js';
+import { locateScript, snapshotScript, watchScript, actionScript } from './bridge/ck3Script.js';
 import { isPackaged, describeRuntime, listAssets } from './runtime.js';
 import { deployMod } from './setup/deployMod.js';
 import { preflight, problemCount } from './setup/preflight.js';
 // Two similarly named things, kept apart on purpose: modVersion's resolves the
 // answer by reading the deployed descriptor, momentum's reports the answer the
 // toolkit is currently acting on.
-import { momentumSupport as resolveMomentumSupport, macroSupport as resolveMacroSupport, momentSupport as resolveMomentSupport, collapseSupport as resolveCollapseSupport, warSupport as resolveWarSupport, logClearSupport as resolveLogClearSupport, setObservedModVersion, observedModVersion } from './setup/modVersion.js';
+import { momentumSupport as resolveMomentumSupport, macroSupport as resolveMacroSupport, momentSupport as resolveMomentSupport, collapseSupport as resolveCollapseSupport, warSupport as resolveWarSupport, dynamicSupport as resolveDynamicSupport, logClearSupport as resolveLogClearSupport, setObservedModVersion, observedModVersion } from './setup/modVersion.js';
 import { setMomentumSupport, momentumSupport as momentumSupportState } from './director/momentum.js';
 import { setMacroSupport, macroSupport as macroSupportState } from './director/macroEvents.js';
 import { setMomentSupport, momentSupport as momentSupportState } from './director/moments.js';
 import { setCollapseSupport, collapseSupport as collapseSupportState } from './director/almohadCollapse.js';
 import { setWarSupport, warSupport as warSupportState, warTitles } from './director/historicalWars.js';
+import { setDynamicSupport, dynamicSupport as dynamicSupportState } from './director/dynamicEvents.js';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -73,8 +77,10 @@ if (process.argv.includes('--selftest')) {
 }
 
 const loreBook = new LoreBook(cfg.loreBookPath);
+const dispatchLedger = new DispatchLedger(cfg.dispatchesPath);
 const baseline = new Baseline(cfg.baselinePath);
 const auditClock = new AuditClock(cfg.auditClockPath);
+const watchlist = new Watchlist(cfg.watchlistPath);
 const runFile = new RunFileManager(cfg.ck3UserFolder);
 const tailer = new LogTailer(cfg.debugLogPath, { errorLogPath: cfg.errorLogPath });
 
@@ -110,6 +116,9 @@ const state = {
   snapshot: null,
   /** @type {any[]} */
   proposals: [],
+  /** Letters from the neighbours, awaiting the player's answer. */
+  /** @type {any[]} */
+  dispatches: [],
   /** @type {{token: number, proposal: any} | null} */
   awaitingApply: null,
   busy: false,
@@ -123,8 +132,21 @@ const state = {
    */
   reorienting: false,
   /** Which request we are waiting on, so duplicate answers are ignored. */
-  /** @type {'locate'|'snapshot'|null} */
+  /** @type {'locate'|'snapshot'|'watch'|null} */
   pending: null,
+  /** When the watchlist was last asked after, in game years. */
+  lastWatchYear: -Infinity,
+  /**
+   * Why this audit is running early, when it is.
+   *
+   * Set by a watchlist divergence and cleared once the audit that it caused has
+   * been attempted. It reaches the prompt, so a divergence audit opens with the
+   * thing that woke it rather than with the same general question the clock
+   * asks.
+   *
+   * @type {{at: string, divergences: any[]} | null}
+   */
+  divergence: null,
   /** When that request was staged, for working out whether the pump is dead. */
   pendingSince: 0,
   /**
@@ -168,6 +190,7 @@ const director = new Director({
   llm,
   loreBook,
   baseline,
+  dispatchLedger,
   knowledge: cfg.knowledge,
   maxProposals: cfg.director.maxProposalsPerAudit,
   maxRealmsInPrompt: cfg.director.maxRealmsInPrompt,
@@ -225,6 +248,35 @@ function requestSnapshot(regions, homeRegions, nearRegions) {
   log(`requested a snapshot of ${labelList(regions)}`);
 }
 
+/**
+ * Ask after the watchlist, if there is one and it is time.
+ *
+ * Deliberately cheap and deliberately not an audit. The probe resolves the
+ * saved tags of at most five rulers and emits one line each, against a
+ * snapshot's several thousand, which is what lets it run every game year. It
+ * costs no completion and no retrieval: what it buys is latency.
+ *
+ * Nothing is staged while anything else is in flight. The caller has already
+ * checked, and the check is repeated here because this is reachable from more
+ * than one place and overwriting a staged batch is the one failure this design
+ * cannot afford.
+ */
+function maybeWatch() {
+  if (!cfg.director.divergenceAudits) return;
+  if (state.pending || state.busy || state.awaitingApply) return;
+
+  const entries = watchlist.probeable();
+  if (entries.length === 0) return;
+  if (state.year - state.lastWatchYear < cfg.director.watchEveryYears) return;
+
+  state.lastWatchYear = state.year;
+  state.pending = 'watch';
+  state.pendingSince = Date.now();
+  const token = runFile.nextToken();
+  runFile.write(watchScript(entries, token), token);
+  log(`asking after ${entries.length} watched ruler(s): ${entries.map((e) => e.ruler).join(', ')}`);
+}
+
 // --------------------------------------------------------------------------
 // The loop
 // --------------------------------------------------------------------------
@@ -277,13 +329,27 @@ tailer.on('record', async (rec) => {
       // `pending` matters as much as `busy`: a staged request that has not
       // been answered yet is an audit already in flight, and the cadence is no
       // longer advanced at request time, so nothing else would stop a second.
-      if (!state.busy && !state.pending) {
+      //
+      // `awaitingApply` is the third, and it was missing. There is one run file
+      // and one pump reading it, so staging a locate on top of an approved
+      // action overwrites it before the game ever sees it - no applied record,
+      // no refused record, and the Lore Book already carrying it as done. That
+      // is the silent loss stagedBatchInFlight exists to prevent on the
+      // approval side, and the heartbeat had its own way in.
+      if (!state.busy && !state.pending && !state.awaitingApply) {
         const due = state.year - state.lastAuditYear >= cfg.director.auditEveryYears;
         const nextDue = state.lastAuditYear + cfg.director.auditEveryYears;
 
         if (due) {
           state.reorienting = false;
           log(`${state.year}: audit due`);
+          requestLocate();
+        } else if (state.divergence) {
+          // Something on the watchlist moved and the clock has not caught up.
+          // The audit is the same audit; what changes is that the prompt opens
+          // with the death rather than with the map.
+          state.reorienting = false;
+          log(`${state.year}: auditing early - ${describeDivergences(state.divergence.divergences)}`);
           requestLocate();
         } else if (!reorientedThisRun) {
           // One free look per run. The orchestrator has just started and knows
@@ -294,6 +360,8 @@ tailer.on('record', async (rec) => {
           state.reorienting = true;
           log(`${state.year}: re-orienting after a restart. Last audit ${state.lastAuditYear}, next due ${nextDue}; taking a snapshot without auditing`);
           requestLocate();
+        } else {
+          maybeWatch();
         }
       }
       break;
@@ -337,6 +405,33 @@ tailer.on('record', async (rec) => {
       break;
     }
 
+    case 'watch': {
+      if (state.pending !== 'watch') break;
+      state.pending = null;
+      runFile.clear();
+
+      const { divergences, unobserved } = watchlist.applyProbe(out.watch.reports, out.watch.date || state.date || '');
+
+      // Said out loud, because it is the honest half of the answer. A watched
+      // ruler the game did not report on is one the list has lost its handle on
+      // - the sweep that gave them a tag has been replaced, or the list entry
+      // is gone - and that is not the same as nothing having happened to them.
+      if (unobserved.length) {
+        log(`${unobserved.length} watched ruler(s) were not reported on: ${unobserved.map((e) => e.ruler).join(', ')}. Not a finding - the next snapshot re-points the list at them.`);
+      }
+
+      if (divergences.length === 0) break;
+
+      for (const d of divergences) log(`watchlist: ${d.what}`);
+      // Held rather than acted on directly. The heartbeat is what stages
+      // requests, and routing every trigger through it keeps one place deciding
+      // whether the bridge is free.
+      state.divergence = { at: out.watch.date || state.date || '', divergences };
+      state.banner = null;
+      broadcast('state', publicState());
+      break;
+    }
+
     case 'snapshot': {
       if (state.pending !== 'snapshot') break;
       state.pending = null;
@@ -357,6 +452,19 @@ tailer.on('record', async (rec) => {
       // audit measures drift against.
       // The sphere goes in with it: county counts are only comparable across
       // audits that looked through the same window or a wider one.
+      // The free half of the divergence check. A snapshot re-describes every
+      // realm in the sphere, so it answers everything the probe asks and more -
+      // and it is also the only thing that can re-point the list's tags, which
+      // the sweep it just ran has invalidated.
+      if (watchlist.reconcile(out.snapshot.totalDays)) {
+        log('this campaign predates the recorded watchlist; the Director is no longer watching anyone');
+      }
+      const watched = watchlist.refresh(out.snapshot);
+      for (const d of watched.divergences) log(`watchlist: ${d.what}`);
+      if (watched.divergences.length && !state.divergence) {
+        state.divergence = { at: out.snapshot.date, divergences: watched.divergences };
+      }
+
       const captured = baseline.offer(out.snapshot, state.sphere.regions);
       if (captured === 'captured') {
         log(`baseline captured at ${out.snapshot.date}: this is the map drift is measured from`);
@@ -390,6 +498,18 @@ tailer.on('record', async (rec) => {
       log(`the game acknowledged the log-clear request (slot ${out.slot})`);
       break;
 
+    case 'dynamicScope':
+      // Logged rather than acted on. It answers, once and for good, whether a
+      // scope saved in a run file reaches an event fired from that same batch -
+      // which decides whether the dynamic event may ever name a second party
+      // in game. Written down here so the answer is in the activity log the
+      // first time anyone approves one, instead of waiting for someone to go
+      // looking in debug.log.
+      log(out.kept
+        ? 'hd_dynamic.0001 kept the scope the run file saved, so the event named the other party'
+        : 'hd_dynamic.0001 did NOT keep the scope the run file saved, so it showed the plainer wording. Batch-saved scopes do not survive into a triggered event.');
+      break;
+
     case 'eventFired':
       // Remembered so the applied line that follows can say whether the event
       // really fired. An event blocked by its own trigger does nothing at all,
@@ -402,11 +522,24 @@ tailer.on('record', async (rec) => {
       // Only the confirmation for the batch we are actually waiting on counts.
       if (!state.awaitingApply || String(state.awaitingApply.token) !== String(out.token)) break;
 
-      if (out.action === 'trigger_event') {
+      // Both event actions land the same way and fail the same way, so they
+      // are reported together. The dynamic one carries effects as well as a
+      // scene, which is why its failure line says what did still happen.
+      if (out.action === 'trigger_event' || out.action === 'trigger_dynamic_event') {
         const fired = state.lastEventFired && Date.now() - state.lastEventFired.at < 30_000;
-        log(fired
-          ? `the game confirmed ${state.lastEventFired.event} reached the ruler`
-          : 'the batch ran, but the event did not fire: its own trigger was not met, so nothing reached the ruler');
+        if (fired) {
+          log(`the game confirmed ${state.lastEventFired.event} reached the ruler`);
+        } else if (out.action === 'trigger_dynamic_event') {
+          // A different diagnosis from the curated events, because this one has
+          // no trigger of its own to fail. Silence here means the running game
+          // has no definition for hd_dynamic.0001 - a mod older than v0.11.0,
+          // or one deployed but not yet loaded - and the effects attached to
+          // the occasion have landed anyway, which the player is owed.
+          log('the batch ran and any gold, prestige or piety landed, but hd_dynamic.0001 never fired.');
+          log('  the running game has no definition for it: deploy the companion mod and restart CK3.');
+        } else {
+          log('the batch ran, but the event did not fire: its own trigger was not met, so nothing reached the ruler');
+        }
         state.lastEventFired = null;
       } else if (out.action === 'historical_war') {
         // Which of the two outcomes the batch saw: the named war running, or
@@ -460,8 +593,23 @@ async function runAudit() {
       log(`no API key set, so no audit. Set ${cfg.llm.apiKeyEnv ?? 'HD_API_KEY'} in your environment, or paste one into the sidebar's Settings tab.`);
       return;
     }
-    const result = await director.audit(state.snapshot, state.sphere.regions);
+    const result = await director.audit(state.snapshot, state.sphere.regions, {
+      // The player's own ground, as against the whole sphere. The border-gore
+      // question is about who holds land where the player does; the sphere is
+      // merely what the Director can see.
+      home: [...state.sphere.home, ...state.sphere.footprint],
+      // Why this audit is running early, when it is. Null for a scheduled one.
+      divergence: state.divergence,
+    });
     state.proposals = result.proposals;
+    // Replaced wholesale rather than merged. A dispatch is what a realm thinks
+    // NOW, and one left over from an audit five years ago is a letter the world
+    // has moved past - the pressure it produced is in the ledger, which is the
+    // part that was meant to persist.
+    state.dispatches = result.dispatches ?? [];
+    if (state.dispatches.length) {
+      log(`${state.dispatches.length} dispatch(es) awaiting your answer`);
+    }
 
     if (result.rejected.length) {
       log(`${result.rejected.length} proposal(s) failed validation and were dropped`);
@@ -470,6 +618,23 @@ async function runAudit() {
     log(result.proposals.length
       ? `the Director has ${result.proposals.length} proposal(s) for your judgement`
       : 'the Director finds this world on track; nothing proposed');
+
+    // Who the Director will be watching until the next audit says otherwise.
+    //
+    // An audit that nominated nobody leaves the list alone rather than emptying
+    // it. A model that simply did not answer that part of the prompt is not the
+    // same thing as a model saying the world is no longer worth watching, and
+    // treating it as such would quietly disable the divergence trigger for the
+    // rest of the campaign.
+    if (result.watchlist?.length) {
+      const adopted = watchlist.adopt(result.watchlist, state.snapshot, cfg.director.watchlistMax);
+      for (const r of adopted.rejected) log(`  dropped: ${r}`);
+      if (adopted.kept.length) {
+        log(`watching until the next audit: ${adopted.kept.map((e) => `${e.ruler} of ${e.primaryTitle}`).join(', ')}`);
+      }
+    } else if (watchlist.size) {
+      watchlist.sweepRetired();
+    }
 
     state.lastAudit = {
       date: state.snapshot?.date ?? '',
@@ -481,9 +646,15 @@ async function runAudit() {
     };
 
     broadcast('proposals', { proposals: state.proposals, assessment: result.note });
+    broadcast('dispatches', { dispatches: state.dispatches });
   } catch (err) {
     log(`audit failed: ${err?.message ?? err}`);
   } finally {
+    // Cleared whether the audit succeeded or not. A divergence that survived a
+    // failed audit would re-trigger on the next heartbeat and go on doing so,
+    // and a death reported once is enough: the watchlist has already recorded
+    // the new state, so nothing is lost but the repetition.
+    state.divergence = null;
     state.busy = false;
     broadcast('state', publicState());
   }
@@ -498,6 +669,50 @@ function findProposal(id) {
   return state.proposals.find((p) => p.id === id);
 }
 
+/**
+ * Is there a staged batch that might still be executed?
+ *
+ * There is one run file and one pump reading it, and `approve` writes straight
+ * over whatever is in there. Nothing stopped it doing that on top of a batch
+ * still waiting to be picked up: two proposals approved inside one pump
+ * interval, and the first was overwritten before the pump ever saw it. No
+ * `applied` record, no `refused` record, and `awaitingApply` replaced by the
+ * second approval so the silence was never even noticed - while the Lore Book
+ * already carried the first as approved, which is what suppresses it from every
+ * later audit. An action that never reached the game, recorded as done, and
+ * never proposed again.
+ *
+ * That is the silent loss of a staged command, which is issue #1 section 3.1
+ * wearing this project's clothes, and it is the one failure this design cannot
+ * afford: every other path in the toolkit reports itself, including the ones
+ * where the game says no.
+ *
+ * `ackPending` has known this since the log budget was written - "the staged
+ * file is not ours to overwrite" is its own comment. `approve` simply never
+ * asked it.
+ *
+ * Past the acknowledgment window the answer flips, and deliberately. A batch
+ * nobody has picked up in fifteen seconds is one `checkLiveness` has already
+ * given up on and told the player about, so holding approvals behind it would
+ * leave the sidebar permanently inert on a dead pump - refusing to act on
+ * account of a batch that is never going to run. Waiting on a live pump is
+ * correct; waiting on a dead one is the same mistake in the other direction.
+ *
+ * @returns {string|null} why this approval must wait, or null to proceed
+ */
+function stagedBatchInFlight() {
+  if (!ackPending()) return null;
+  if (state.pendingSince && Date.now() - state.pendingSince > DEFAULT_ACK_MS) return null;
+
+  if (state.awaitingApply) {
+    return 'the game has not finished the last approved action yet.'
+      + ` Still waiting on: ${state.awaitingApply.proposal.preview.slice(0, 80)}.`
+      + ' Try again in a moment - approving now would overwrite it before the game read it.';
+  }
+  return 'the Director is mid-question with the game (a snapshot is staged and unanswered).'
+    + ' Try again in a moment - approving now would overwrite it.';
+}
+
 function approve({ id }) {
   const p = findProposal(id);
   if (!p) return { error: 'no such proposal' };
@@ -505,9 +720,24 @@ function approve({ id }) {
   const action = TOOLKIT[p.action];
   if (!action) return { error: `toolkit no longer has ${p.action}` };
 
+  // Checked before anything is recorded. An approval refused here has not
+  // happened at all: the proposal stays in the list, the ledger is untouched,
+  // and the player can approve it again in a second or two.
+  const wait = stagedBatchInFlight();
+  if (wait) {
+    log(`approval held: ${wait}`);
+    return { error: wait };
+  }
+
   const token = runFile.nextToken();
   runFile.write(actionScript(action.toScript(p.args, token, state.snapshot)), token);
   state.awaitingApply = { token, proposal: p };
+  // Stamped here, not left at whatever the last snapshot set. checkLiveness
+  // measures the acknowledgment window from pendingSince, so without this an
+  // approved action inherited a timestamp from an unrelated earlier request and
+  // could be declared unacknowledged the moment it was staged - or, worse, be
+  // given far longer than it should before anyone noticed it had gone missing.
+  state.pendingSince = Date.now();
 
   loreBook.record({
     date: p.date, year: p.year, verdict: 'approved', action: p.action,
@@ -527,6 +757,87 @@ function approve({ id }) {
   broadcast('state', publicState());
   broadcast('proposals', { proposals: state.proposals });
   return { ok: true };
+}
+
+/**
+ * The player answers a neighbour.
+ *
+ * Not an approval, and deliberately not routed through one. `approve` exists
+ * because the Director proposes and the player decides; here the player is
+ * choosing their own move from a fixed set, so the click IS the consent and
+ * there is nothing to approve.
+ *
+ * What keeps that honest is that the set is fixed. Every effect a reply can
+ * have is a constant in dispatches.js, reached by lookup, and the reply key is
+ * checked against that table before anything is composed - so an endpoint
+ * reachable from a browser cannot be talked into staging an effect that is not
+ * in the table, whatever it is handed.
+ *
+ * The ledger is written even when nothing reaches the game, because silence is
+ * the reply whose whole point is that it is remembered.
+ */
+function dispatchReply({ id, reply }) {
+  const d = state.dispatches.find((x) => x.id === id);
+  if (!d) return { error: 'no such dispatch' };
+  if (!isReply(reply)) return { error: `no such reply: ${String(reply).slice(0, 40)}` };
+
+  // Offered to this dispatch, not merely present in the table. The faith and
+  // kin appeals are gated on the map, and an endpoint that accepted one the
+  // sidebar never drew would be a hole straight through that gate.
+  if (!d.replies.some((r) => r.key === reply)) {
+    return { error: `${reply} is not offered on this dispatch: ${d.withheld?.[reply] ?? 'not available'}` };
+  }
+
+  const realm = state.snapshot?.realmsById?.get(d.fromId);
+  if (!realm) return { error: 'that realm is no longer in the snapshot' };
+
+  const ctx = {
+    state: state.snapshot,
+    player: state.snapshot?.player,
+    from: realm,
+    stance: { key: d.stance, posture: d.posture, evidence: d.evidence },
+    pressure: d.pressure,
+  };
+
+  const script = replyScript(reply, ctx, 0);
+
+  // Only a reply with something to stage has to wait its turn. Silence stages
+  // nothing, so holding it behind an in-flight batch would be refusing to
+  // record a decision that never needed the game's help.
+  if (script.length) {
+    const wait = stagedBatchInFlight();
+    if (wait) {
+      log(`reply held: ${wait}`);
+      return { error: wait };
+    }
+    const token = runFile.nextToken();
+    runFile.write(actionScript(replyScript(reply, ctx, token)), token);
+    state.awaitingApply = {
+      token,
+      proposal: { preview: `${REPLIES[reply].label} to ${d.from}`, action: 'dispatch_reply' },
+    };
+    state.pendingSince = Date.now();
+  }
+
+  const after = dispatchLedger.record(realm, reply, {
+    date: state.snapshot?.date ?? '', year: state.year, stance: d.stance,
+  });
+
+  loreBook.record({
+    date: state.snapshot?.date ?? '', year: state.year,
+    verdict: reply === 'ignore' ? 'declined' : 'approved',
+    action: 'dispatch_reply',
+    summary: `${REPLIES[reply].label} to ${d.from} (${d.stance})`,
+    rationale: d.evidence.join('; '),
+    narrative: d.message ?? '',
+  });
+
+  state.dispatches = state.dispatches.filter((x) => x.id !== id);
+  log(`answered ${d.from}: ${REPLIES[reply].label}. Pressure now ${after.pressure} of 3${after.breaking ? " - they will not write again" : ''}`);
+
+  broadcast('state', publicState());
+  broadcast('dispatches', { dispatches: state.dispatches });
+  return { ok: true, pressure: after.pressure, breaking: after.breaking };
 }
 
 function decline({ id }) {
@@ -575,6 +886,11 @@ function warState() {
   return { ok: m.ok, version: m.version, reason: m.reason, checked: m.checked };
 }
 
+function dynamicState() {
+  const m = dynamicSupportState();
+  return { ok: m.ok, version: m.version, reason: m.reason, checked: m.checked };
+}
+
 function publicState() {
   return {
     connected: state.connected,
@@ -600,6 +916,13 @@ function publicState() {
     },
     lastRefusal: state.lastRefusal ?? null,
     lastAudit: state.lastAudit,
+    watchlist: {
+      entries: watchlist.all().map((e) => ({
+        ruler: e.ruler, primaryTitle: e.primaryTitle, why: e.why, since: e.since, retired: Boolean(e.retired),
+      })),
+      lastChecked: Number.isFinite(state.lastWatchYear) ? state.lastWatchYear : null,
+      pending: Boolean(state.divergence),
+    },
     config: {
       // Read from the live client, not the loaded config: these can be changed
       // from the settings panel, and the World tab would otherwise go on
@@ -614,6 +937,7 @@ function publicState() {
       moment: momentState(),
       collapse: collapseState(),
       war: warState(),
+      dynamic: dynamicState(),
       sphereMax: cfg.director.sphereMax,
       maxRealmsInPrompt: cfg.director.maxRealmsInPrompt,
       knowledge: cfg.knowledge.enabled,
@@ -635,10 +959,19 @@ const llmSettings = createSettingsHandlers(llm, cfg);
 const directorSettings = createDirectorSettings(cfg, director);
 
 const { server, broadcast } = createServer({
-  state: () => ({ state: publicState(), proposals: state.proposals, log: state.log }),
+  // Dispatches belong in the initial fill for the same reason proposals do:
+  // the event stream only carries what happens after a sidebar connects, and
+  // an audit that ran before the page was opened - or before it was refreshed -
+  // would otherwise leave four alarmed neighbours invisible while the log said
+  // they were waiting. Watched happening on 2026-09-12.
+  state: () => ({
+    state: publicState(), proposals: state.proposals, dispatches: state.dispatches, log: state.log,
+  }),
   lorebook: () => ({ entries: loreBook.all() }),
   approve,
   decline,
+  dispatch: dispatchReply,
+  dispatches: () => ({ dispatches: state.dispatches, ledger: dispatchLedger.all() }),
   audit: async () => {
     // An explicit request always audits, whatever the clock says. It is the
     // override for a cadence the player has decided is too slow, and for the
@@ -828,14 +1161,17 @@ function checkModCapabilities() {
   const war = resolveWarSupport(cfg.ck3UserFolder);
   setWarSupport(war);
 
+  const dynamic = resolveDynamicSupport(cfg.ck3UserFolder);
+  setDynamicSupport(dynamic);
+
   // Not handed to a module the way the others are: nothing in the toolkit
   // depends on it, because clearing the log is maintenance and never touches
   // game state. It only decides whether asking is worth doing.
   state.logClear = resolveLogClearSupport(cfg.ck3UserFolder);
 
-  const version = mom.version ?? macro.version ?? moment.version ?? collapse.version ?? war.version;
-  if (mom.ok && macro.ok && moment.ok && collapse.ok && war.ok) {
-    log(`companion mod v${version} deployed; momentum, macro events, the moment library, the Almohad collapse and historical wars available`);
+  const version = mom.version ?? macro.version ?? moment.version ?? collapse.version ?? war.version ?? dynamic.version;
+  if (mom.ok && macro.ok && moment.ok && collapse.ok && war.ok && dynamic.ok) {
+    log(`companion mod v${version} deployed; momentum, macro events, the moment library, the Almohad collapse, historical wars and the dynamic event available`);
   } else {
     if (version) log(`companion mod v${version} deployed`);
     if (!mom.ok) log(`momentum unavailable: ${mom.reason}`);
@@ -843,9 +1179,10 @@ function checkModCapabilities() {
     if (!moment.ok) log(`historical moments unavailable: ${moment.reason}`);
     if (!collapse.ok) log(`the Almohad collapse is unavailable: ${collapse.reason}`);
     if (!war.ok) log(`historical wars are unavailable: ${war.reason}`);
+    if (!dynamic.ok) log(`the dynamic event is unavailable: ${dynamic.reason}`);
     if (!state.logClear.ok) log(`log clearing unavailable: ${state.logClear.reason}. CK3 can stop logging after as little as 17MB in a session; a long campaign will need a restart.`);
   }
-  return { momentum: mom, macro, moment, collapse, war };
+  return { momentum: mom, macro, moment, collapse, war, dynamic };
 }
 
 /**

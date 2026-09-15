@@ -3,6 +3,8 @@ config.json
 lorebook.json
 baseline.json
 auditclock.json
+dispatches.json
+watchlist.json
 *.env
 .env.*
 !.env.example

@@ -14,7 +14,10 @@ import path from 'node:path';
 import os from 'node:os';
 
 const args = process.argv.slice(2);
-const scenarioName = args.includes('--byzantium') ? 'byzantium' : args.includes('--andalus') ? 'andalus' : 'iberia';
+const scenarioName = args.includes('--byzantium') ? 'byzantium'
+  : args.includes('--andalus') ? 'andalus'
+  : args.includes('--anatolia') ? 'anatolia'
+  : 'iberia';
 const logIdx = args.indexOf('--log');
 const defaultCk3 = path.join(os.homedir(), 'Documents', 'Paradox Interactive', 'Crusader Kings III');
 const logPath = logIdx !== -1 ? args[logIdx + 1] : path.join(defaultCk3, 'logs', 'debug.log');
@@ -85,6 +88,39 @@ const SCENARIOS = {
     // the parser has to collapse it.
     wars: [[4001, 3001, 3002, 'Conquest of Navarra']],
   },
+  // Anatolia, 1071: the worked example for the v0.11 features. Three things
+  // are planted and each exercises a different one.
+  //
+  // A French king holds a duchy in Anatolia and is ruled from Francia, which is
+  // three adjacency steps away and therefore outside the sphere entirely - the
+  // ahistorical holding the detector is for. Serbia holds ground here too, from
+  // next door, and is the control: a frontier realm that must NOT be flagged.
+  // And Manzikert is a month away, which is what the window retrieval should
+  // find when it asks what the record has happening in 1066-1076.
+  anatolia: {
+    date: '1071.8.26',
+    totalDays: 391_000,
+    playerId: 5001,
+    regions: ['world_asia_minor'],
+    player: { capital: 'Ikonion', culture: 'Greek', faith: 'Orthodox', title: 'Byzantine Empire', tier: 'Empire' },
+    realms: [
+      [5001, 'Romanos IV', 'Byzantine Empire', 'Empire', 24, 'Greek', 'Orthodox', 'Ikonion', 'Diogenes', 'House Diogenes', 'yes', 'Feudal'],
+      [5002, 'Alp Arslan', 'Seljuk Sultanate', 'Kingdom', 11, 'Turkish', 'Sunni', 'Rayy', 'Seljuk', 'House Seljuk', 'yes', 'Feudal'],
+      [5003, 'Philippe I', 'Kingdom of France', 'Kingdom', 9, 'French', 'Catholic', 'Paris', 'Capet', 'House Capet', 'yes', 'Feudal'],
+      [5004, 'Mihailo', 'Kingdom of Serbia', 'Kingdom', 6, 'Serbian', 'Orthodox', 'Ras', 'Vojislavljevic', 'House Vojislavljevic', 'yes', 'Feudal'],
+      [5005, 'Gagik II', 'Kingdom of Armenia', 'Kingdom', 4, 'Armenian', 'Miaphysite', 'Ani', 'Bagratuni', 'House Bagratuni', 'yes', 'Feudal'],
+    ],
+    // Where each realm is ruled from. Anything not named here is seated on the
+    // player's own ground; anything named a region the sweep does not cover
+    // reports no seat at all, exactly as the real probe would.
+    seats: {
+      5003: 'world_europe_west_francia',
+      5004: 'world_europe_south_east',
+    },
+    majorTitles: {
+      5003: [{ region: 'world_asia_minor', tier: 'duchy', name: 'Duchy of Anatolia' }],
+    },
+  },
 };
 
 const scenario = SCENARIOS[scenarioName];
@@ -108,7 +144,14 @@ function emitLocate() {
   console.log(`[sim] answered locate: ${p.title} at ${p.capital}`);
 }
 
-function emitSnapshot(token) {
+function emitSnapshot(token, staged = '') {
+  // Which regions the sweep actually covers, read off the staged script rather
+  // than assumed. The real mod can only report a seat in a region it was asked
+  // to test, so a capital outside the sphere produces no record at all - and
+  // that silence is a case the detector has to handle. Reproducing it here is
+  // the difference between exercising the feature and exercising a fixture.
+  const swept = [...new Set([...staged.matchAll(/region = (world_[a-z_]+)/g)].map((m) => m[1]))];
+  const covered = swept.length ? swept : scenario.regions;
   emit(`HD:/;/snapshot_begin/;/${token}/;/${scenario.date}/;/${scenario.totalDays}/;/${scenario.playerId}`);
   for (const r of scenario.realms) {
     emit(`HD:/;/realm/;/${r.join('/;/')}`);
@@ -130,6 +173,19 @@ function emitSnapshot(token) {
         emit(`HD:/;/realm_home/;/${r[0]}`);
         emit(`HD:/;/realm_near/;/${r[0]}`);
       }
+      // Where the realm is ruled from, which is what tells an ahistorical
+      // holding from a large one. Defaults to the player's own region, so a
+      // scenario that says nothing produces a map with no foreigners on it -
+      // the right default, because inventing one would exercise the detector
+      // against data the scenario never claimed.
+      const seat = (scenario.seats ?? {})[r[0]] ?? scenario.regions[0];
+      if (covered.includes(seat)) emit(`HD:/;/realm_capital/;/${r[0]}/;/${seat}`);
+      for (const reg of covered.filter((x) => scenario.regions.includes(x))) {
+        emit(`HD:/;/realm_in_region/;/${r[0]}/;/${reg}`);
+      }
+      for (const t of (scenario.majorTitles ?? {})[r[0]] ?? []) {
+        emit(`HD:/;/realm_title/;/${r[0]}/;/${t.region}/;/${t.tier}/;/${t.name}`);
+      }
     }
   }
   // Wars, emitted exactly as the mod does: from inside the same per-realm loop
@@ -143,6 +199,34 @@ function emitSnapshot(token) {
   emit(`HD:/;/snapshot_end/;/${token}`);
   const wars = (scenario.wars ?? []).length;
   console.log(`[sim] answered snapshot ${token}: ${scenario.realms.length} realms${wars ? `, ${wars} war(s)` : ''}`);
+}
+
+/**
+ * Answer a watchlist probe.
+ *
+ * Tags are positions in the sweep, and this simulator emits realm lines in
+ * scenario order, so tag N is the Nth realm. That is the same correspondence
+ * the real mod relies on, which is why it can be reproduced here at all.
+ *
+ * `--kill-watched` reports the first watched ruler as dead, which is the only
+ * way to exercise the divergence trigger without waiting for a real campaign to
+ * kill somebody.
+ */
+function emitWatch(text) {
+  const token = text.match(/watch_begin\/;\/(\d+)/)?.[1] ?? '0';
+  const tags = [...text.matchAll(/var:hd_tag = (\d+)/g)].map((m) => Number(m[1]));
+  emit(`HD:/;/watch_begin/;/${token}/;/${scenario.date}`);
+  tags.forEach((tag, i) => {
+    const r = scenario.realms[tag];
+    if (!r) return;
+    if (i === 0 && process.argv.includes('--kill-watched')) {
+      emit(`HD:/;/watch/;/${tag}/;/dead/;/${r[0]}`);
+      return;
+    }
+    emit(`HD:/;/watch/;/${tag}/;/alive/;/${r[0]}/;/${r[2]}/;/${r[5]}/;/${r[6]}`);
+  });
+  emit(`HD:/;/watch_end/;/${token}`);
+  console.log(`[sim] answered watch ${token}: ${tags.length} ruler(s)${process.argv.includes('--kill-watched') ? ', reporting the first as dead' : ''}`);
 }
 
 // Play the role of the execution pump: notice staged script and respond.
@@ -160,7 +244,8 @@ setInterval(() => {
 
   const token = text.match(/value = (\d+)/)?.[1] ?? '0';
   if (text.includes('hd_locate_player') || text.includes('locate_begin')) emitLocate();
-  else if (text.includes('snapshot_begin')) emitSnapshot(token);
+  else if (text.includes('snapshot_begin')) emitSnapshot(token, text);
+  else if (text.includes('watch_begin')) emitWatch(text);
   else {
     // Toolkit actions now carry their own applied/refused records, so the fake
     // pump just replays whichever branch a real game would have taken. It
@@ -178,6 +263,24 @@ setInterval(() => {
     const carried = ['add_pressed_claim', 'add_gold', 'add_prestige', 'add_piety', 'add_character_modifier', 'start_war']
       .filter((effect) => text.includes(effect));
     if (carried.length) console.log(`[sim] batch carries: ${carried.join(', ')}`);
+
+    // An event reports itself from inside its own immediate block, which is how
+    // the orchestrator tells an event that fired from one whose trigger refused
+    // it. Reproduced here because the difference is reported to the player, and
+    // a simulator that is silent about it makes the honest branch untestable.
+    const fired = text.match(/trigger_event = (hd_[a-z_]+\.\d+)/)?.[1];
+    if (fired) {
+      emit(`HD:/;/event_fired/;/${fired}`);
+      // And, for the dynamic event, whether the scope the run file saved
+      // survived into it. The real answer is unknown until someone watches it
+      // in a live game; the simulator reports "kept" because its scopes are
+      // imaginary and it has nothing to lose them to. Do not read this as
+      // evidence either way - it exercises the path, it does not answer the
+      // question.
+      if (fired === 'hd_dynamic.0001' && text.includes('save_scope_as = hd_dyn_other')) {
+        emit('HD:/;/dynamic_scope/;/kept');
+      }
+    }
     if (process.argv.includes('--refuse')) {
       emit(`HD:/;/refused/;/${tok}/;/${action}/;/precondition_failed`);
       console.log(`[sim] refused ${action} (precondition false)`);

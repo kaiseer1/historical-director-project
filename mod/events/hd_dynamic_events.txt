@@ -1,0 +1,160 @@
+﻿namespace = hd_dynamic
+
+# The generic Director event: one event definition, many occasions.
+#
+# ## What this is, and what it deliberately is not
+#
+# CK3 cannot hot-load an event file, so an event the Director invents at
+# runtime has to be an event that already exists and reads its occasion from
+# the world. That much is the design brief. What the brief also asked for -
+# title and desc populated from `var:hd_event_title` - the engine cannot do,
+# and it is worth writing down why so nobody spends an evening rediscovering it.
+#
+# 1. `title` and `desc` take a localization key, or a block that *selects*
+#    among localization keys. They do not take a string, and there is no data
+#    function that prints a variable as free text.
+# 2. A variable can hold a number, a scope, or a flag. A flag is a script
+#    identifier - `flag:historical_justice` - with no spaces and no
+#    punctuation. Even if it could be printed, prose is not an identifier.
+# 3. Checked against the shipped 1.19 binary on 2026-09-15: the console has
+#    `reload assets`, `reload texture`, `reload jomini` and `reload_views`, and
+#    no localization reload. So the other route - write a .yml at runtime and
+#    reload it through the pump's ExecuteConsoleCommand - has no evidence
+#    behind it either. Negative result, kept.
+#
+# So the arbitrary half of what the model writes - its own title and its own
+# paragraph - goes where arbitrary text has always gone in this project: the
+# sidebar card, which is the thing the player actually reads before deciding.
+# What the game shows is this event, and what makes it dynamic is:
+#
+#   * the OCCASION, chosen at runtime from `hd_dyn_kind`, a flag the
+#     orchestrator sets in the same batch that fires the event;
+#   * the PEOPLE, interpolated live from saved scopes, so the same sentence
+#     names whoever this is actually about;
+#   * the CONSEQUENCES, applied by the batch rather than in here, so the
+#     preview the player approved can state them to the coin.
+#
+# ## The scope question, asked out loud
+#
+# `scope:hd_dyn_other` is saved by the run file, not by this event. Whether a
+# scope saved in a batch survives into an event fired from that same batch is
+# NOT YET OBSERVED - and this project has already been bitten once by assuming
+# scopes reach places they do not (see ck3Script.js on `[scope:x]` inside
+# debug_log, which returns the literal text `ERROR:[...]`).
+#
+# So nothing here depends on the answer. Every occasion has two descriptions:
+# one that names the other party and one that does not, and the trigger picks
+# between them with `exists`. If the scope does not survive, the player reads a
+# slightly plainer paragraph and nothing breaks. The immediate block reports
+# which of the two happened, so the first live firing answers the question for
+# good instead of leaving it open another release.
+
+hd_dynamic.0001 = {
+	type = character_event
+	theme = learning
+
+	title = {
+		first_valid = {
+			triggered_desc = {
+				trigger = {
+					has_global_variable = hd_dyn_kind
+					global_var:hd_dyn_kind = flag:historical_justice
+				}
+				desc = hd_dynamic.0001.t.historical_justice
+			}
+			triggered_desc = {
+				trigger = {
+					has_global_variable = hd_dyn_kind
+					global_var:hd_dyn_kind = flag:foreign_holding
+				}
+				desc = hd_dynamic.0001.t.foreign_holding
+			}
+			triggered_desc = {
+				trigger = {
+					has_global_variable = hd_dyn_kind
+					global_var:hd_dyn_kind = flag:succession
+				}
+				desc = hd_dynamic.0001.t.succession
+			}
+			desc = hd_dynamic.0001.t.notice
+		}
+	}
+
+	# Two entries per occasion, the fuller one first. The `exists` test is what
+	# makes a lost scope cost a clause rather than an error: CK3 renders an
+	# unresolvable [scope:x] as the literal string ERROR:[scope:x...], which
+	# would reach the player as if it were the sentence.
+	desc = {
+		first_valid = {
+			triggered_desc = {
+				trigger = {
+					has_global_variable = hd_dyn_kind
+					global_var:hd_dyn_kind = flag:historical_justice
+					exists = scope:hd_dyn_other
+				}
+				desc = hd_dynamic.0001.desc.historical_justice_named
+			}
+			triggered_desc = {
+				trigger = {
+					has_global_variable = hd_dyn_kind
+					global_var:hd_dyn_kind = flag:historical_justice
+				}
+				desc = hd_dynamic.0001.desc.historical_justice
+			}
+			triggered_desc = {
+				trigger = {
+					has_global_variable = hd_dyn_kind
+					global_var:hd_dyn_kind = flag:foreign_holding
+					exists = scope:hd_dyn_other
+				}
+				desc = hd_dynamic.0001.desc.foreign_holding_named
+			}
+			triggered_desc = {
+				trigger = {
+					has_global_variable = hd_dyn_kind
+					global_var:hd_dyn_kind = flag:foreign_holding
+				}
+				desc = hd_dynamic.0001.desc.foreign_holding
+			}
+			triggered_desc = {
+				trigger = {
+					has_global_variable = hd_dyn_kind
+					global_var:hd_dyn_kind = flag:succession
+					exists = scope:hd_dyn_other
+				}
+				desc = hd_dynamic.0001.desc.succession_named
+			}
+			triggered_desc = {
+				trigger = {
+					has_global_variable = hd_dyn_kind
+					global_var:hd_dyn_kind = flag:succession
+				}
+				desc = hd_dynamic.0001.desc.succession
+			}
+			desc = hd_dynamic.0001.desc.notice
+		}
+	}
+
+	left_portrait = {
+		character = root
+		animation = thinking
+	}
+
+	immediate = {
+		debug_log = "HD:/;/event_fired/;/hd_dynamic.0001"
+		# The observation this event exists to make, beyond the one it makes to
+		# the player. One line, once per firing, and the question above is
+		# answered the first time anyone approves one of these.
+		if = {
+			limit = { exists = scope:hd_dyn_other }
+			debug_log = "HD:/;/dynamic_scope/;/kept"
+		}
+		else = {
+			debug_log = "HD:/;/dynamic_scope/;/lost"
+		}
+	}
+
+	option = {
+		name = hd_dynamic.0001.a
+	}
+}

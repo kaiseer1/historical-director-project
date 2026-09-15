@@ -112,7 +112,13 @@ function scan(dir, fields, valuePattern) {
 }
 
 // Events: title, desc, and the name of each option.
-scan('events', ['title', 'desc', 'name'], /^hd_event\.\d+\.[a-z]+$/);
+//
+// Two namespaces, and the second one needs the wider key shape. hd_dynamic's
+// keys carry the occasion in a third segment - hd_dynamic.0001.desc.succession
+// - because one event selects among them at runtime, and a pattern written for
+// hd_event.0100.desc would have scanned straight past every one of them and
+// reported nothing missing.
+scan('events', ['title', 'desc', 'name'], /^hd_(?:event|dynamic)\.\d+\.[a-z_]+(?:\.[a-z_]+)?$/);
 // Decisions: the description and tooltip keys.
 scan('common/decisions', ['desc', 'selection_tooltip', 'confirm_text'], /^hd_[a-z0-9_]+$/);
 

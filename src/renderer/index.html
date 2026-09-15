@@ -17,6 +17,7 @@
 
   <nav class="tabs">
     <button class="tab active" data-tab="proposals">Proposals <span class="badge" id="proposal-count">0</span></button>
+    <button class="tab" data-tab="dispatches">Dispatches <span class="badge" id="dispatch-count">0</span></button>
     <button class="tab" data-tab="world">World</button>
     <button class="tab" data-tab="ledger">Lore Book</button>
     <button class="tab" data-tab="log">Log</button>
@@ -33,6 +34,11 @@
         <div id="last-audit" class="last-audit"></div>
         <button id="audit-now" class="secondary">Audit now</button>
       </div>
+    </section>
+
+    <section id="tab-dispatches" class="panel">
+      <p class="muted ledger-intro">What your neighbours make of you. Each stance is read off the live map, and the reasons are listed so you can check them. Saying nothing is an answer, and it is remembered.</p>
+      <div id="dispatches"></div>
     </section>
 
     <section id="tab-world" class="panel">

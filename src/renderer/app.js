@@ -5,7 +5,7 @@
 
 const $ = (id) => document.getElementById(id);
 
-let current = { state: null, proposals: [], assessment: '' };
+let current = { state: null, proposals: [], assessment: '', dispatches: [] };
 
 // --- tabs ------------------------------------------------------------------
 
@@ -16,6 +16,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
     tab.classList.add('active');
     $(`tab-${tab.dataset.tab}`).classList.add('active');
     if (tab.dataset.tab === 'ledger') loadLedger();
+    if (tab.dataset.tab === 'dispatches') renderDispatches();
     if (tab.dataset.tab === 'settings') loadSettings();
   });
 });
@@ -45,6 +46,7 @@ const events = new EventSource('/events');
 events.onmessage = (e) => {
   const { type, payload } = JSON.parse(e.data);
   if (type === 'state') { current.state = payload; renderStatus(); renderWorld(); renderLastAudit(); }
+  if (type === 'dispatches') { current.dispatches = payload.dispatches ?? []; renderDispatches(); }
   if (type === 'proposals') {
     current.proposals = payload.proposals ?? [];
     if (payload.assessment !== undefined) current.assessment = payload.assessment;
@@ -57,7 +59,8 @@ events.onmessage = (e) => {
 post('state', {}).then((d) => {
   current.state = d.state;
   current.proposals = d.proposals ?? [];
-  renderStatus(); renderWorld(); renderProposals();
+  current.dispatches = d.dispatches ?? [];
+  renderStatus(); renderWorld(); renderProposals(); renderDispatches();
   $('log').textContent = (d.log ?? []).join('\n');
 });
 
@@ -207,8 +210,118 @@ function renderProposal(p) {
 }
 
 async function rule(id, verdict, card) {
-  card.querySelectorAll('button').forEach((b) => (b.disabled = true));
-  await post(verdict, { id });
+  const buttons = [...card.querySelectorAll('button')];
+  buttons.forEach((b) => (b.disabled = true));
+  const res = await post(verdict, { id });
+
+  // A verdict the orchestrator refused has to give the card back. The one
+  // reason it refuses is that a batch is already staged and unanswered - the
+  // run file is single, and writing over a batch the pump has not read yet
+  // loses it silently - which clears in a pump tick or two. A card left inert
+  // after that would be the sidebar dropping a proposal the orchestrator is
+  // still holding, and the player with no way to tell that from a decline.
+  if (res?.error) {
+    buttons.forEach((b) => (b.disabled = false));
+    let note = card.querySelector('.verdict-note');
+    if (!note) {
+      note = el('p', 'warn verdict-note');
+      card.appendChild(note);
+    }
+    note.textContent = res.error;
+    return;
+  }
+  card.querySelector('.verdict-note')?.remove();
+}
+
+/**
+ * The Dispatches tab: what the neighbours make of you, and what you say back.
+ *
+ * The evidence is rendered under every letter, not hidden behind a toggle. A
+ * stance the player cannot check is one the model might as well have invented,
+ * and this whole tab is only worth having if the reasons are as visible as the
+ * prose.
+ */
+function renderDispatches() {
+  const host = $('dispatches');
+  const count = $('dispatch-count');
+  if (!host) return;
+  host.textContent = '';
+
+  const list = current.dispatches ?? [];
+  if (count) {
+    count.textContent = String(list.length);
+    count.hidden = list.length === 0;
+  }
+
+  if (list.length === 0) {
+    host.appendChild(el('p', 'muted', 'Nobody has anything to say to you at the moment.'));
+    return;
+  }
+
+  for (const d of list) host.appendChild(renderDispatch(d));
+}
+
+function renderDispatch(d) {
+  const card = el('article', d.breaking ? 'proposal breaking' : 'proposal');
+
+  card.appendChild(el('h2', null, `${d.from} is ${d.stanceLabel ?? d.stance}`));
+
+  const meta = el('div', 'meta');
+  meta.appendChild(el('span', null, `${d.ruler} · pressure ${d.pressure} of 3`));
+  if (d.breaking) {
+    meta.appendChild(document.createTextNode(' · '));
+    meta.appendChild(el('span', 'destructive', 'their last word'));
+  }
+  card.appendChild(meta);
+
+  // The letter, where there is one. A realm with a stance and no prose still
+  // appears: the stance and its evidence are the substance, and a model that
+  // skipped the words must not silence a neighbour the map says is alarmed.
+  if (d.message) card.appendChild(el('p', 'narrative', d.message));
+  else card.appendChild(el('p', 'narrative muted', `${d.from} sends word, though no text came with it. The reasons are below.`));
+
+  card.appendChild(el('h3', null, 'Why they think so'));
+  const ul = el('ul', 'sources');
+  for (const e of d.evidence ?? []) {
+    const li = document.createElement('li');
+    li.textContent = e;
+    ul.appendChild(li);
+  }
+  card.appendChild(ul);
+
+  if (d.pressureNote) card.appendChild(el('p', d.breaking ? 'warn' : 'muted', d.pressureNote));
+
+  const verdict = el('div', 'verdict verdict-wrap');
+  for (const r of d.replies ?? []) {
+    const b = el('button', r.key === 'ignore' ? 'decline' : 'approve', r.label);
+    b.title = r.summary;
+    b.onclick = () => answer(d.id, r.key, card);
+    verdict.appendChild(b);
+  }
+  card.appendChild(verdict);
+
+  // Every cost named before the click, in the open rather than in a tooltip.
+  const costs = el('ul', 'sources');
+  for (const r of d.replies ?? []) {
+    const li = document.createElement('li');
+    li.textContent = `${r.label} — ${r.summary}`;
+    costs.appendChild(li);
+  }
+  card.appendChild(costs);
+
+  return card;
+}
+
+async function answer(id, reply, card) {
+  const buttons = [...card.querySelectorAll('button')];
+  buttons.forEach((b) => (b.disabled = true));
+  const res = await post('dispatch', { id, reply });
+  if (res?.error) {
+    buttons.forEach((b) => (b.disabled = false));
+    let note = card.querySelector('.verdict-note');
+    if (!note) { note = el('p', 'warn verdict-note'); card.appendChild(note); }
+    note.textContent = res.error;
+  }
 }
 
 function renderWorld() {
@@ -284,6 +397,8 @@ function renderWorld() {
       'Its modifiers, its event chain and the union decision all live in the companion mod, so the whole action is withheld rather than partly applied.'],
     [s.config?.moment, 'The historical moment library is unavailable.',
       'Its events and modifiers live in the companion mod, so moments are withheld entirely rather than staged with half their effects.'],
+    [s.config?.dynamic, "The Director's own dynamic event is unavailable.",
+      'hd_dynamic.0001 lives in the companion mod, and an older game would take the effects attached to an occasion while the occasion itself never happened.'],
   ];
   for (const [feature, headline, consequence] of gated) {
     if (!feature || feature.ok) continue;
@@ -309,7 +424,7 @@ function renderWorld() {
       const macro = s.config?.macro;
       const version = mom?.version ?? macro?.version;
       if (!version) return mom?.checked ? 'not deployed' : 'unverified';
-      const stale = [!mom?.ok && 'momentum', !macro?.ok && 'macro events', !s.config?.moment?.ok && 'historical moments'].filter(Boolean);
+      const stale = [!mom?.ok && 'momentum', !macro?.ok && 'macro events', !s.config?.moment?.ok && 'historical moments', !s.config?.dynamic?.ok && 'dynamic events'].filter(Boolean);
       return stale.length ? `v${version} (too old for ${stale.join(' and ')})` : `v${version}`;
     })()],
     ['Model', s.config?.model ?? '-'],
@@ -328,6 +443,30 @@ function renderWorld() {
 
   if (s.sphere?.note && s.sphere.home?.length) {
     host.appendChild(el('p', 'muted', s.sphere.note));
+  }
+
+  // Who the Director is watching, and why.
+  //
+  // Shown because it is the one thing the Director does on its own initiative
+  // between audits: it can interrupt its own cadence on the strength of this
+  // list, and a player who cannot see the list has no way to know why an audit
+  // arrived early. The reason beside each name is the model's own note to
+  // itself, kept verbatim.
+  const watch = s.watchlist?.entries ?? [];
+  if (watch.length) {
+    host.appendChild(el('h3', null, 'Watched between audits'));
+    host.appendChild(el('p', 'muted',
+      'The Director asks after these rulers once a game year, at a cost of a few log lines and no completion.'
+      + ' A death, a lost primary title, or a change of faith or culture brings the next audit forward.'));
+    const ul = document.createElement('ul');
+    for (const w of watch) {
+      const li = document.createElement('li');
+      li.appendChild(el('strong', null, `${w.ruler}${w.primaryTitle ? ` of ${w.primaryTitle}` : ''}`));
+      if (w.retired) li.appendChild(el('span', 'muted', ' — gone; the next audit will say what followed'));
+      if (w.why) li.appendChild(el('p', 'muted', w.why));
+      ul.appendChild(li);
+    }
+    host.appendChild(ul);
   }
 }
 

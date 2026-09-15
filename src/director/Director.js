@@ -4,6 +4,9 @@ import { label, labelList } from './regions.js';
 import { bookmarkBriefing } from './bookmarkTiers.js';
 import { momentBriefing } from './moments.js';
 import { warBriefing } from './historicalWars.js';
+import { dispatches as stancesFor, stanceBriefing } from './stances.js';
+import { dispatchFor, pressureNote } from './dispatches.js';
+import { borderGoreBriefing } from './borderGore.js';
 import * as wikipedia from '../knowledge/wikipedia.js';
 import * as wikidata from '../knowledge/wikidata.js';
 
@@ -143,6 +146,48 @@ function warSection(snapshot) {
 }
 
 /**
+ * What the record has happening in the ten years around this date, here.
+ *
+ * Kept separate from the general evidence block on purpose, and labelled with
+ * the queries that produced it. The two retrievals answer different questions -
+ * one asks who these people are, this one asks what is supposed to be happening
+ * - and a model handed them as one undifferentiated pile of extracts cannot
+ * tell which of them is about the date.
+ *
+ * The queries are printed because an empty section is ambiguous otherwise. "We
+ * asked these four questions and the encyclopedia had nothing" and "nobody
+ * asked" are different states of knowledge, and only the first is evidence
+ * about the world.
+ *
+ * @param {any} evidence
+ * @returns {string[]}
+ */
+function windowSection(evidence) {
+  const w = evidence?.window;
+  if (!w || !w.queries?.length) return [];
+
+  const heading = `## The record for ${w.from}-${w.to}`;
+  const asked = `Asked: ${w.queries.map((q) => `"${q}"`).join('; ')}.`;
+
+  if (w.documents.length === 0) {
+    return [
+      heading,
+      `${asked} Nothing came back that could place itself inside that window.`
+      + ' That is a fact about this retrieval, not about the decade: treat it as missing evidence rather than as a quiet ten years.',
+      '',
+    ];
+  }
+
+  return [
+    heading,
+    asked,
+    ...w.documents.map((d) => `### ${d.title}\n${d.extract}\nSource: ${d.url}`),
+    ...(w.rejected?.length ? [`(discarded as outside the window: ${w.rejected.join(', ')})`] : []),
+    '',
+  ];
+}
+
+/**
  * The Historical Director.
  *
  * Runs one audit: take the world as the mod reported it, retrieve what the
@@ -171,25 +216,85 @@ export class Director {
     this.knowledge = deps.knowledge ?? { enabled: true };
     this.maxProposals = deps.maxProposals ?? 2;
     this.maxRealmsInPrompt = deps.maxRealmsInPrompt ?? 40;
+    // What the world remembers about how it has been answered. Optional, so an
+    // orchestrator or a test harness without one still audits - it simply gets
+    // a world with no memory, where every dispatch is a first letter.
+    this.dispatchLedger = deps.dispatchLedger ?? null;
     this.log = deps.log ?? (() => {});
+  }
+
+  /**
+   * The letters the neighbours are sending this audit.
+   *
+   * The stance is decided here, from the map, before the model sees anything.
+   * What the model is asked for is the WORDS - and only for realms this
+   * function already chose. A message naming a realm with no stance is dropped,
+   * for the same reason a proposal naming a character the snapshot never
+   * reported is: the model may write, it may not nominate.
+   *
+   * Pressure is read before it is used, and a succession is noticed first, so a
+   * letter written under a new king goes out at the softened figure rather than
+   * at his father's.
+   *
+   * @param {any} snapshot
+   * @returns {Array<any>} dispatches awaiting prose, strongest feeling first
+   */
+  pendingDispatches(snapshot) {
+    const player = snapshot?.player;
+    if (!player) return [];
+
+    const out = [];
+    for (const { realm, stance } of stancesFor({ state: snapshot, baseline: this.baseline })) {
+      // A death is an opening, and it has to be applied before the letter is
+      // built rather than after it is answered.
+      this.dispatchLedger?.sawRuler?.(realm, snapshot.date ?? '');
+      const pressure = this.dispatchLedger?.pressureOf?.(realm) ?? 0;
+
+      const d = dispatchFor({ state: snapshot, player, from: realm, stance, pressure });
+      // The sentence the consent argument rests on, attached here rather than
+      // composed in the sidebar: what silence costs has to travel with the
+      // dispatch, so it is in the payload a player could inspect and in the
+      // ledger's own reckoning, not only in the markup.
+      if (d) out.push({ ...d, pressureNote: pressureNote(d) });
+    }
+    return out;
   }
 
   /**
    * @param {any} snapshot
    * @param {string[]} sphere region ids
+   * @param {{home?: string[], divergence?: {at: string, divergences: any[]}|null}} [opts]
+   *   `home` is the ground the player actually rules, which is a narrower thing
+   *   than the sphere and the only ground the border question is asked about.
+   *   `divergence` is set when the watchlist woke this audit early.
    * @returns {Promise<{proposals: any[], evidence: any, rejected: string[], note: string}>}
    */
-  async audit(snapshot, sphere) {
+  async audit(snapshot, sphere, opts = {}) {
     const year = snapshot.year;
-    this.log(`auditing ${year} across ${labelList(sphere)} (${snapshot.realms.length} realms)`);
+    const home = opts.home?.length ? opts.home : sphere;
+    const divergence = opts.divergence ?? null;
+    this.log(divergence
+      ? `auditing ${year} across ${labelList(sphere)} (${snapshot.realms.length} realms), woken early by the watchlist`
+      : `auditing ${year} across ${labelList(sphere)} (${snapshot.realms.length} realms)`);
 
     // Before anything reads a delta. The footprint and disappearance signals
     // are only sound when this window contains the one the baseline was taken
     // through, and this is how the baseline finds that out.
     this.baseline?.observing?.(sphere);
 
-    const evidence = await this.retrieve(snapshot, sphere, year);
-    const raw = await this.propose(snapshot, sphere, evidence);
+    const evidence = await this.retrieve(snapshot, sphere, year, { home, divergence });
+
+    // Decided from the map, before the model is called, and passed into the
+    // prompt so the same completion that judges the world also gives it a
+    // voice. One call, not two: an audit already costs a retrieval pass and a
+    // paid completion, and the neighbours having something to say is not worth
+    // doubling that.
+    const pending = this.pendingDispatches(snapshot);
+    if (pending.length) {
+      this.log(`${pending.length} realm(s) have something to say to you`);
+    }
+
+    const raw = await this.propose(snapshot, sphere, evidence, pending, { home, divergence });
 
     /** @type {any[]} */
     const proposals = [];
@@ -254,7 +359,38 @@ export class Director {
       if (proposals.length >= this.maxProposals) break;
     }
 
-    return { proposals, evidence, rejected, note: raw.assessment ?? '' };
+    // The model wrote words for realms this audit already chose. Anything it
+    // named that we did not is dropped rather than repaired - the same rule a
+    // malformed proposal gets, and for the same reason: a letter from a realm
+    // the map never gave a stance to is the model nominating, not writing.
+    const byId = new Map(pending.map((d) => [d.fromId, d]));
+    /** @type {any[]} */
+    const spoken = [];
+    for (const m of raw.dispatches ?? []) {
+      const d = byId.get(Number(m?.from));
+      if (!d) {
+        rejected.push(`dispatch: no realm with id ${m?.from} has a stance this audit`);
+        continue;
+      }
+      if (d.message) continue; // one letter per realm, first one wins
+      d.message = String(m.message ?? '').slice(0, 700);
+      spoken.push(d);
+    }
+
+    // A realm with a stance and no words still sends its letter. The stance and
+    // its evidence are the substance; the prose is the delivery, and a model
+    // that skipped one must not silence a neighbour the map says is alarmed.
+    for (const d of pending) if (!d.message) d.message = '';
+
+    // Who to keep an eye on until the next audit. Validated in Watchlist
+    // against this same snapshot, not here, because the list has to outlive
+    // this call and the thing that persists it is the thing that should decide
+    // what it is willing to store.
+    const watched = Array.isArray(raw.watchlist) ? raw.watchlist.slice(0, 8) : [];
+
+    return {
+      proposals, evidence, rejected, note: raw.assessment ?? '', dispatches: pending, watchlist: watched,
+    };
   }
 
   /**
@@ -262,9 +398,9 @@ export class Director {
    * Wikidata. Both are best-effort; whatever comes back is what the model gets,
    * and the shortfall is reported rather than hidden.
    */
-  async retrieve(snapshot, sphere, year) {
+  async retrieve(snapshot, sphere, year, opts = {}) {
     if (this.knowledge.enabled === false) {
-      return { documents: [], structured: [], sources: [], degraded: true };
+      return { documents: [], structured: [], window: null, sources: [], degraded: true };
     }
 
     // Topics carry no year: the retriever adds the century itself, which
@@ -296,6 +432,39 @@ export class Director {
     });
     const structured = await wikidata.evidenceFor(relevant.slice(0, 8), year);
 
+    // The question the pass above cannot ask.
+    //
+    // Those topics are dynasties and titles and region names, and none of them
+    // carries a date, so an audit in 1050 and an audit in 1250 of the same
+    // sphere retrieve very nearly the same documents. That is fine for "who are
+    // these people" and useless for "is something supposed to be happening this
+    // decade". The Director could therefore tell you the world had drifted and
+    // never that the record had an event in it the world had missed.
+    //
+    // So this asks the other question, built from the year and the place
+    // together: what does the record have happening in THIS ten-year window,
+    // HERE. Narrower filter to match - a document that cannot place itself in
+    // the window is not an answer to a question about the window.
+    //
+    // Two places, which is four queries. The player's own ground first, because
+    // that is what the sphere is for, and then whoever the watchlist woke us
+    // about, because an audit that fired because Harold died should be looking
+    // up Harold.
+    const places = [
+      ...(opts.home ?? sphere).slice(0, 2).map((r) => label(r)),
+      ...(opts.divergence?.divergences ?? []).slice(0, 1).map((d) => d.who).filter(Boolean),
+    ];
+    const window = await wikipedia.retrieveWindow(places, {
+      lang: this.knowledge.wikipediaLang ?? 'en',
+      year,
+      span: 5,
+      maxDocuments: 3,
+      maxQueries: 4,
+    });
+    this.log(window.documents.length
+      ? `the record for ${window.from}-${window.to}: ${window.documents.map((d) => d.title).join(', ')}`
+      : `nothing found in the record for ${window.from}-${window.to} across ${places.join(', ')}`);
+
     const dropped = documents.rejected ?? [];
     // "0 realms with structured backing" is the same sentence whether the world
     // has no attested history or Wikidata declined to answer, and for a whole
@@ -310,13 +479,22 @@ export class Director {
     return {
       documents,
       structured,
-      sources: [...documents.map((d) => d.url), ...structured.map((s) => s.url)],
-      degraded: documents.length === 0 && structured.length === 0,
+      window,
+      sources: [
+        ...documents.map((d) => d.url),
+        ...structured.map((s) => s.url),
+        ...window.documents.map((d) => d.url),
+      ],
+      degraded: documents.length === 0 && structured.length === 0 && window.documents.length === 0,
     };
   }
 
   /** Build the prompt and get structured proposals back. */
-  async propose(snapshot, sphere, evidence) {
+  async propose(snapshot, sphere, evidence, pending = [], opts = {}) {
+    const home = opts.home?.length ? opts.home : sphere;
+    const divergence = opts.divergence ?? null;
+    const borders = borderGoreBriefing({ state: snapshot, home });
+
     const system = [
       'You are the Historical Director for a Crusader Kings III campaign.',
       '',
@@ -366,6 +544,18 @@ export class Director {
       'iberian_pressure is a peninsula gathering around a unifier, and is supported by how much ground the Andalusian realms still hold. almohad_collapse is a Muslim power in Iberia coming apart from the inside after Las Navas de Tolosa, and is supported by how little. They are not intensities of one thing, and a 13th-century peninsula can carry both at once - Castile consolidating while the Almohads disintegrate is the historical case, not a contradiction. Each is refused outright when the live map will not support it, so propose the one the map is actually showing you.',
       'almohad_collapse is the only action that moves rulers who did not choose to move: some vassals of the collapsing ruler raise independence factions at once. Say so plainly in the consequences field. It still transfers no titles and starts no wars.',
       '',
+      'THE RECORD HAS EVENTS IN IT, NOT ONLY CONDITIONS.',
+      'One retrieval pass below is keyed to this decade and this place rather than to these dynasties: it asks what the record has happening in the ten years around the current date, here. Read it against the live snapshot in both directions. If the record has a battle, a succession or a collapse in this window and the map shows no sign of it, that is a divergence worth naming. If the map contradicts the outcome of something the record says has just happened, that is the same thing from the other side.',
+      'Absence in that section is not evidence of a quiet decade. It says which queries were issued; if they came back empty, say so in the assessment rather than treating a quiet retrieval as a quiet century.',
+      '',
+      'A HOLDING CAN BE WRONG IN A WAY A BORDER IS NOT.',
+      'The section below on holdings lists rulers who hold ground on the player\'s own soil while being seated somewhere else - a court that does not border the land it rules, or one outside the observed sphere entirely. Judge each one: is a polity of this kind, holding this ground, from that distance, something this century recognises? A conquest that the record itself carries is not a divergence, and neither is a marcher lord on a frontier - those are listed separately and were already set aside. What you are looking for is authority in a shape the period has no place for.',
+      'There is no revocation in this toolkit and there will not be. You cannot revoke a title from a ruler who is not your vassal, in this game or in the century, and an action that quietly transferred a title from one ruler to another would be the Director playing rather than directing. The remedy is the one the period used: give the claim to whoever the record says should hold it with grant_claim, and stage trigger_dynamic_event with kind "historical_justice" so the claim arrives as an argument somebody is making rather than as a gift from nowhere. Name in the consequences field that this starts nothing by itself.',
+      '',
+      'THE DYNAMIC EVENT IS FOR OCCASIONS NOBODY WROTE IN ADVANCE.',
+      'trigger_dynamic_event stages the Director\'s own event and carries your own title and paragraph to the player. Use it where something is worth putting in front of them and no curated moment or war fits - and be clear about where your words go. The player reads them on the card. The ruler in the game sees the mod\'s own wording for the occasion you chose, because CK3 cannot be handed a sentence at runtime, so do not write your paragraph as a letter to the recipient.',
+      'It is the weakest verb here on purpose: it changes nothing but a little coin and what somebody knows. That makes it the right partner for a claim and the wrong substitute for one.',
+      '',
       'PREFER BUILDING OVER BREAKING.',
       'The toolkit can add to the world as well as subtract from it. A macro event sets a historical process in motion and lets the rulers inside it decide; an endowed spawn_character puts a claimant of the right house in a court that can press for them; grant_claim gives a ruler a reason to act. Reach for those first.',
       'adjust_title_tier is the last resort, for drift that nothing constructive can address - not the default way of saying "this realm is wrong". At most one demotion is accepted per audit regardless, so spending the audit on one is a choice about what you are not proposing.',
@@ -378,6 +568,25 @@ export class Director {
       'Each proposal carries a narrative: three to five sentences that read as if written from inside the world, weaving the retrieved history together with what is actually happening in this campaign. The Request section below gives you both halves - lore on one side, live state on the other - and the card is where they meet. Name the rulers and realms the snapshot actually reports; do not invent a third thing that is in neither half.',
       'It is prose for the player to read before deciding, and nothing more. No mechanical effect is drawn from it: what an approval does is fixed by the action you named and its parameters, and the narrative cannot add to that, subtract from it, or change it. Write it as an argument for why this moment matters, not as a description of what the button does - the preview already says that, precisely.',
       '',
+      ...(pending.length ? [
+        'THE DISPATCHES.',
+        'Some realms near the player have something to say to them, and the Request section lists which ones, what they feel, and the facts on the map that produced it. Those stances are already decided. You are not being asked whether a realm is alarmed - the map has answered that - you are being asked for the words it sends.',
+        'Write each as a letter from that court to the player: two to four sentences, in the voice of the ruler or their chancellor, at that date. Name the specific things the evidence lines give you - the ground lost, the counties, the faith, the realms that have shrunk - because a letter that could have been sent by anyone to anyone is worse than no letter.',
+        'It is a message, not a demand with mechanics attached: what the player can actually do about it is a fixed set of replies the sidebar offers, and nothing you write changes what those are or what they cost. Do not name a price, do not offer terms, do not threaten a specific war on a specific date.',
+        'Write only for the realms listed. A letter from anyone else is discarded.',
+        '',
+      ] : []),
+      'NAME WHO IS WORTH WATCHING BETWEEN AUDITS.',
+      'Audits are years apart, because each one costs a retrieval pass and a completion. Some history does not wait that long: a king dies at the wrong moment and the next five years are decided before anyone looks again. So every audit also nominates three to five rulers from the table whose death, loss of their primary title, or change of faith or culture should bring the Director back early.',
+      'Choose the load-bearing ones. A ruler whose survival the next thirty years of this region visibly depend on, a realm whose collapse would rearrange the map, a succession the record says is about to be contested. Not the largest realms by reflex, and not the player.',
+      'Give the id exactly as the table gives it, and one sentence on why that person. The sentence is shown to the player and handed back to you if the watch fires, so write it as a note to your future self: what you expect to happen to them, and what it would mean if it did.',
+      '',
+      ...(divergence ? [
+        'THIS AUDIT WAS WOKEN EARLY.',
+        'Something on the watchlist moved before the clock came round, and the Request section says what. That is the question in front of you: what does the record say follows from it, and does the live map now need something it did not need last year? Audit the rest of the world as usual, but lead with this.',
+        'Do not assume the change is bad. A ruler dying on time is the record being followed, not broken, and the right answer may be that the world is doing exactly what it should.',
+        '',
+      ] : []),
       'Respond with JSON only, in this shape:',
       '{',
       '  "assessment": "one paragraph on how closely this world tracks the record",',
@@ -390,6 +599,16 @@ export class Director {
       '    "consequences": "what changes in the campaign if this is approved",',
       '    "confidence": "high | medium | low",',
       '    "narrative": "3-5 sentences of in-world prose for the sidebar card, half history and half this campaign - see the Request section"',
+      '  }]',
+      ...(pending.length ? [
+        '  ,"dispatches": [{',
+        '    "from": <the realm id exactly as the dispatch list gives it>,',
+        '    "message": "2-4 sentences, the letter that court sends the player"',
+        '  }]',
+      ] : []),
+      '  ,"watchlist": [{',
+      '    "id": <a realm id exactly as the table gives it>,',
+      '    "why": "one sentence: what you expect to happen to them, and what it would mean"',
       '  }]',
       '}',
       `Return at most ${this.maxProposals} proposals.`,
@@ -429,6 +648,23 @@ export class Director {
       ...(wars ? ['## Historical wars on the record', wars, ''] : []),
       ...warSection(snapshot),
       ...vanishedSection(snapshot, this.baseline),
+      ...(pending.length ? [
+        '## Realms with something to say to you',
+        stanceBriefing({ state: snapshot, baseline: this.baseline }),
+        '',
+        'Write a letter for each of these, keyed by the id given:',
+        pending.map((d) => `- id ${d.fromId}: ${d.from} under ${d.ruler}, ${d.stance}`
+          + `${d.breaking ? ' — and this is the last word they will send before they act' : ''}`).join('\n'),
+        '',
+      ] : []),
+      ...(divergence ? [
+        '## Why this audit is running early',
+        `Reported by the game on ${divergence.at}. These are the people this Director asked to be told about, and what the game says has happened to them:`,
+        ...divergence.divergences.map((d) => `- ${d.what}${d.why ? ` — watched since ${d.since || 'an earlier audit'} because: ${d.why}` : ''}`),
+        '',
+      ] : []),
+      ...(borders ? ['## Holdings on the player\'s own ground, held from elsewhere', borders, ''] : []),
+      ...windowSection(evidence),
       '## Retrieved historical evidence',
       evidenceBlock,
       '',
@@ -451,6 +687,8 @@ export class Director {
     return {
       assessment: response?.assessment ?? '',
       proposals: Array.isArray(response?.proposals) ? response.proposals : [],
+      dispatches: Array.isArray(response?.dispatches) ? response.dispatches : [],
+      watchlist: Array.isArray(response?.watchlist) ? response.watchlist : [],
     };
   }
 }

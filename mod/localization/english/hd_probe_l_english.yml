@@ -1,0 +1,12 @@
+﻿l_english:
+ # Historical Director - PROBE ONLY. Delete before release.
+ #
+ # Two candidate forms for a dynamically built war name, on one line, so one
+ # console round trip settles which resolves. Read the result off GetName:
+ #
+ #   A= carries the target title  -> scope interpolation works, six CBs suffice
+ #   B= carries the target title  -> the other form works
+ #   both literal                 -> dynamic naming does not work here, and
+ #                                   every war needs its own CB and string
+ HD_PROBE_WAR_NAME:0 "A=[GetTitle('$TARGET_TITLE$')|E] B=[war.GetCasusBelli.GetTargetTitle.GetName]"
+ HD_PROBE_CB_NAME:0 "Probe Claim"
