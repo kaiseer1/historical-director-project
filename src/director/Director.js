@@ -145,6 +145,48 @@ function warSection(snapshot) {
 }
 
 /**
+ * What the record has happening in the ten years around this date, here.
+ *
+ * Kept separate from the general evidence block on purpose, and labelled with
+ * the queries that produced it. The two retrievals answer different questions -
+ * one asks who these people are, this one asks what is supposed to be happening
+ * - and a model handed them as one undifferentiated pile of extracts cannot
+ * tell which of them is about the date.
+ *
+ * The queries are printed because an empty section is ambiguous otherwise. "We
+ * asked these four questions and the encyclopedia had nothing" and "nobody
+ * asked" are different states of knowledge, and only the first is evidence
+ * about the world.
+ *
+ * @param {any} evidence
+ * @returns {string[]}
+ */
+function windowSection(evidence) {
+  const w = evidence?.window;
+  if (!w || !w.queries?.length) return [];
+
+  const heading = `## The record for ${w.from}-${w.to}`;
+  const asked = `Asked: ${w.queries.map((q) => `"${q}"`).join('; ')}.`;
+
+  if (w.documents.length === 0) {
+    return [
+      heading,
+      `${asked} Nothing came back that could place itself inside that window.`
+      + ' That is a fact about this retrieval, not about the decade: treat it as missing evidence rather than as a quiet ten years.',
+      '',
+    ];
+  }
+
+  return [
+    heading,
+    asked,
+    ...w.documents.map((d) => `### ${d.title}\n${d.extract}\nSource: ${d.url}`),
+    ...(w.rejected?.length ? [`(discarded as outside the window: ${w.rejected.join(', ')})`] : []),
+    '',
+  ];
+}
+
+/**
  * The Historical Director.
  *
  * Runs one audit: take the world as the mod reported it, retrieve what the
@@ -220,10 +262,14 @@ export class Director {
   /**
    * @param {any} snapshot
    * @param {string[]} sphere region ids
+   * @param {{home?: string[]}} [opts]
+   *   `home` is the ground the player actually rules, which is a narrower thing
+   *   than the sphere and the only ground the border question is asked about.
    * @returns {Promise<{proposals: any[], evidence: any, rejected: string[], note: string}>}
    */
-  async audit(snapshot, sphere) {
+  async audit(snapshot, sphere, opts = {}) {
     const year = snapshot.year;
+    const home = opts.home?.length ? opts.home : sphere;
     this.log(`auditing ${year} across ${labelList(sphere)} (${snapshot.realms.length} realms)`);
 
     // Before anything reads a delta. The footprint and disappearance signals
@@ -231,7 +277,7 @@ export class Director {
     // through, and this is how the baseline finds that out.
     this.baseline?.observing?.(sphere);
 
-    const evidence = await this.retrieve(snapshot, sphere, year);
+    const evidence = await this.retrieve(snapshot, sphere, year, { home });
 
     // Decided from the map, before the model is called, and passed into the
     // prompt so the same completion that judges the world also gives it a
@@ -341,9 +387,9 @@ export class Director {
    * Wikidata. Both are best-effort; whatever comes back is what the model gets,
    * and the shortfall is reported rather than hidden.
    */
-  async retrieve(snapshot, sphere, year) {
+  async retrieve(snapshot, sphere, year, opts = {}) {
     if (this.knowledge.enabled === false) {
-      return { documents: [], structured: [], sources: [], degraded: true };
+      return { documents: [], structured: [], window: null, sources: [], degraded: true };
     }
 
     // Topics carry no year: the retriever adds the century itself, which
@@ -375,6 +421,39 @@ export class Director {
     });
     const structured = await wikidata.evidenceFor(relevant.slice(0, 8), year);
 
+    // The question the pass above cannot ask.
+    //
+    // Those topics are dynasties and titles and region names, and none of them
+    // carries a date, so an audit in 1050 and an audit in 1250 of the same
+    // sphere retrieve very nearly the same documents. That is fine for "who are
+    // these people" and useless for "is something supposed to be happening this
+    // decade". The Director could therefore tell you the world had drifted and
+    // never that the record had an event in it the world had missed.
+    //
+    // So this asks the other question, built from the year and the place
+    // together: what does the record have happening in THIS ten-year window,
+    // HERE. Narrower filter to match - a document that cannot place itself in
+    // the window is not an answer to a question about the window.
+    //
+    // Two places, which is four queries. The player's own ground first, because
+    // that is what the sphere is for, and then whoever the watchlist woke us
+    // about, because an audit that fired because Harold died should be looking
+    // up Harold.
+    const places = [
+      ...(opts.home ?? sphere).slice(0, 2).map((r) => label(r)),
+      ...(opts.divergence?.divergences ?? []).slice(0, 1).map((d) => d.who).filter(Boolean),
+    ];
+    const window = await wikipedia.retrieveWindow(places, {
+      lang: this.knowledge.wikipediaLang ?? 'en',
+      year,
+      span: 5,
+      maxDocuments: 3,
+      maxQueries: 4,
+    });
+    this.log(window.documents.length
+      ? `the record for ${window.from}-${window.to}: ${window.documents.map((d) => d.title).join(', ')}`
+      : `nothing found in the record for ${window.from}-${window.to} across ${places.join(', ')}`);
+
     const dropped = documents.rejected ?? [];
     // "0 realms with structured backing" is the same sentence whether the world
     // has no attested history or Wikidata declined to answer, and for a whole
@@ -389,8 +468,13 @@ export class Director {
     return {
       documents,
       structured,
-      sources: [...documents.map((d) => d.url), ...structured.map((s) => s.url)],
-      degraded: documents.length === 0 && structured.length === 0,
+      window,
+      sources: [
+        ...documents.map((d) => d.url),
+        ...structured.map((s) => s.url),
+        ...window.documents.map((d) => d.url),
+      ],
+      degraded: documents.length === 0 && structured.length === 0 && window.documents.length === 0,
     };
   }
 
@@ -444,6 +528,10 @@ export class Director {
       'THE TWO IBERIAN MACRO ACTIONS DESCRIBE OPPOSITE PROCESSES.',
       'iberian_pressure is a peninsula gathering around a unifier, and is supported by how much ground the Andalusian realms still hold. almohad_collapse is a Muslim power in Iberia coming apart from the inside after Las Navas de Tolosa, and is supported by how little. They are not intensities of one thing, and a 13th-century peninsula can carry both at once - Castile consolidating while the Almohads disintegrate is the historical case, not a contradiction. Each is refused outright when the live map will not support it, so propose the one the map is actually showing you.',
       'almohad_collapse is the only action that moves rulers who did not choose to move: some vassals of the collapsing ruler raise independence factions at once. Say so plainly in the consequences field. It still transfers no titles and starts no wars.',
+      '',
+      'THE RECORD HAS EVENTS IN IT, NOT ONLY CONDITIONS.',
+      'One retrieval pass below is keyed to this decade and this place rather than to these dynasties: it asks what the record has happening in the ten years around the current date, here. Read it against the live snapshot in both directions. If the record has a battle, a succession or a collapse in this window and the map shows no sign of it, that is a divergence worth naming. If the map contradicts the outcome of something the record says has just happened, that is the same thing from the other side.',
+      'Absence in that section is not evidence of a quiet decade. It says which queries were issued; if they came back empty, say so in the assessment rather than treating a quiet retrieval as a quiet century.',
       '',
       'THE DYNAMIC EVENT IS FOR OCCASIONS NOBODY WROTE IN ADVANCE.',
       'trigger_dynamic_event stages the Director\'s own event and carries your own title and paragraph to the player. Use it where something is worth putting in front of them and no curated moment or war fits - and be clear about where your words go. The player reads them on the card. The ruler in the game sees the mod\'s own wording for the occasion you chose, because CK3 cannot be handed a sentence at runtime, so do not write your paragraph as a letter to the recipient.',
@@ -535,6 +623,7 @@ export class Director {
           + `${d.breaking ? ' — and this is the last word they will send before they act' : ''}`).join('\n'),
         '',
       ] : []),
+      ...windowSection(evidence),
       '## Retrieved historical evidence',
       evidenceBlock,
       '',

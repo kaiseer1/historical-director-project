@@ -139,6 +139,107 @@ export function plausibleForEra(extract, year, modernCutoff = 1500) {
   return !numbers.every((n) => n >= modernCutoff);
 }
 
+/**
+ * Does this lead belong to the window the audit is actually asking about?
+ *
+ * `plausibleForEra` answers a much weaker question - "is this not obviously
+ * about the twentieth century" - and it has to stay weak, because the general
+ * retrieval pass is looking for background and a survey article with no dates
+ * in its lead is perfectly good background.
+ *
+ * A window query is not looking for background. It asks what was happening in
+ * this place in these ten years, so a document that cannot place itself in
+ * those ten years is not an answer to it, and a lead with no dates at all is
+ * the commonest way of failing to be one.
+ *
+ * Two ways to pass. Either the lead cites a year inside the window - "the
+ * Battle of Manzikert was fought in 1071" - or it cites a span that contains
+ * the window, which is how dynasty and polity articles date themselves: the
+ * Seljuk Empire's lead says 1037 and 1194 and neither is inside an 1066-1076
+ * window, while the empire certainly was.
+ *
+ * @param {string} extract
+ * @param {number} from
+ * @param {number} to
+ */
+export function inAuditWindow(extract, from, to) {
+  const years = [...String(extract).matchAll(/\b(\d{3,4})\b/g)]
+    .map((m) => Number(m[1]))
+    .filter((n) => n >= 100 && n <= 2100);
+
+  if (years.length === 0) return false;
+  if (years.some((n) => n >= from && n <= to)) return true;
+  return Math.min(...years) < from && Math.max(...years) > to;
+}
+
+/**
+ * Ask what the record has happening HERE, NOW - rather than what it has to say
+ * about these dynasties in general.
+ *
+ * The difference is the point. The general pass takes the realms on the table
+ * and looks each of them up, which answers "who are these people" and is what
+ * a first audit needs. It cannot answer "is something supposed to be happening
+ * this decade that is not", because nothing in it is keyed to the date: an
+ * audit in 1050 and an audit in 1250 of the same sphere retrieve almost the
+ * same documents.
+ *
+ * So this builds its queries from the year and the place together, and filters
+ * on the window rather than on the century. The queries are returned alongside
+ * the documents because an empty result is itself information the model needs -
+ * "nothing found for these questions" and "nobody asked" are different states
+ * and the prompt says which one it is in.
+ *
+ * @param {string[]} places labels, not region ids - "Anatolia and the Caucasus"
+ * @param {{lang?: string, year: number, span?: number, maxDocuments?: number, maxQueries?: number, pauseMs?: number}} opts
+ * @returns {Promise<{documents: Array<{title: string, extract: string, url: string}>, queries: string[], from: number, to: number, rejected: string[]}>}
+ */
+export async function retrieveWindow(places, opts) {
+  const lang = opts.lang ?? 'en';
+  const year = Number(opts.year) || 0;
+  const span = Math.max(1, Math.trunc(opts.span ?? 5));
+  const max = opts.maxDocuments ?? 3;
+  const maxQueries = opts.maxQueries ?? 4;
+  const pauseMs = opts.pauseMs ?? 150;
+
+  const from = year - span;
+  const to = year + span;
+  if (!year) return { documents: [], queries: [], from, to, rejected: [] };
+
+  // Two intents per place, in the order they are worth having. Wikipedia's
+  // full-text search is what is actually being talked to here, so the queries
+  // name the year as a word: an article about a battle in this window says the
+  // year in its first sentence, and that is the term doing the work.
+  const intents = ['battle siege conquest', 'succession dynasty collapse'];
+  const queries = [];
+  for (const place of places.filter(Boolean)) {
+    for (const intent of intents) {
+      if (queries.length >= maxQueries) break;
+      queries.push(`${place} ${year} ${intent}`);
+    }
+  }
+
+  const titles = [];
+  for (const q of queries) {
+    const hits = await search(q, { lang, limit: 3 });
+    for (const h of hits) if (!titles.includes(h)) titles.push(h);
+    await sleep(pauseMs);
+  }
+
+  /** @type {Array<{title: string, extract: string, url: string}>} */
+  const documents = [];
+  /** @type {string[]} */
+  const rejected = [];
+  for (const title of titles) {
+    if (documents.length >= max) break;
+    const doc = await summary(title, { lang });
+    if (!doc) continue;
+    if (inAuditWindow(doc.extract, from, to)) documents.push(doc);
+    else rejected.push(doc.title);
+  }
+
+  return { documents, queries, from, to, rejected };
+}
+
 /** 867 -> "9th century", for queries that carry their own period. */
 function centuryOf(year) {
   const c = Math.floor((year - 1) / 100) + 1;
