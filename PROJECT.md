@@ -122,6 +122,11 @@ The mod writes delimited records into `logs/debug.log`:
 HD:/;/realm/;/1002/;/Alfonso VI/;/Kingdom of Leon/;/Kingdom/;/14/;/Castilian/;/Catholic/;/…
 ```
 
+The record kinds are additive by rule. A field is never appended to an existing record — `realm` is
+parsed positionally, so growing that line would break every parser already reading it — and anything
+new arrives as its own kind keyed on the character id it belongs to. That is why a truncated log costs
+one realm its tier, or its seat, rather than shifting every later realm's onto the wrong ruler.
+
 Everything is prefixed `HD:` so it stays disjoint from Voices of the Court's `VOTC:` traffic and both
 mods can be installed together. The orchestrator tails the file, surviving the truncation CK3
 performs on each launch.
@@ -165,6 +170,10 @@ that into literal, guarded script.
 | `spawn_character` | Place a figure in an existing ruler's court. Optionally born into a named ruler's dynastic house, and optionally carrying a pressed claim on a named ruler's primary title, which the host may press in a claimant war or leave alone |
 | `trigger_event` | Put a historically-patterned choice in front of a ruler: intervene across water, an invited crossing, a plea for protection. Grants a claim only if they accept |
 | `iberian_pressure` | **Macro event.** Sets the Reconquista-era pressure toward consolidation running around one ruler and up to four partners: truces, and at higher intensity alliances, hooks and a union decision. Transfers no title and starts no war |
+| `almohad_collapse` | **Macro event.** The opposite process: a Muslim power in Iberia coming apart from the inside after Las Navas de Tolosa. The only action that moves rulers who did not choose to move — some vassals raise independence factions at once. Transfers no title and starts no war |
+| `historical_moment` | A curated turning point the record names, with its own framing, an event the ruler sees, and effects tuned to that moment. Claims are capped at kingdom tier |
+| `historical_war` | **The only action that starts a war.** A war the record names, near its date, under its own casus belli and historical name. Refused outside its window, when the land is already the attacker's, or when the attacker is not free to declare |
+| `trigger_dynamic_event` | Stage the Director's own event for an occasion nobody wrote in advance. The model supplies a title and a paragraph, which the PLAYER reads on the card, and picks one of four occasions, which is what the GAME shows. Grants no claim, transfers no title, starts no war |
 
 ### Why this is safe
 
@@ -340,6 +349,17 @@ Both are sequential, capped, paced and cached. Both endpoints throttle anonymous
 *empty results rather than errors*, which is indistinguishable from "no such record" unless you are
 careful.
 
+**A second, smaller pass asks a different question.** The lookups above are built from the dynasties
+and titles on the table, and none of those carries a date — so an audit in 1050 and an audit in 1250
+of the same sphere retrieve very nearly the same documents. That answers *who are these people*, which
+is what a first audit needs, and cannot answer *is something supposed to be happening this decade that
+is not*. Since v0.11 each audit also issues up to four queries built from the year and the player's own
+regions together, and keeps only documents whose lead can place itself inside the ten-year window —
+either by citing a year in it or by citing a span containing it, which is how dynasty articles date
+themselves. The queries are printed into the prompt beside their results, because "we asked these four
+questions and the encyclopedia had nothing" and "nobody asked" are different states of knowledge and
+only the first is evidence about the world.
+
 The paper's design calls for chunked local dumps in a vector store. That remains the right
 destination; the live APIs are the near path to the same place, and when the store lands only these
 two modules change.
@@ -362,11 +382,28 @@ granted them a claim on Cyrenaica. Both applied to the running game.
 It also declined to act when the world was on track, and refused to invent a sphere for a player in
 Khwarezm before that region was supported.
 
+### What is built but has not been watched in CK3
+
+Kept separate from the paragraphs above on purpose: those describe a live campaign, and everything
+here has only been seen working against the simulated game and the check suite. The distinction is the
+whole point of the section.
+
+- **The generic dynamic event** (v0.11). One event definition standing in for occasions nobody wrote
+  in advance, its occasion chosen at runtime from a global flag and its people interpolated live.
+- **The seat and held-title probes** (v0.11). Where each realm is *ruled from*, and which duchy- and
+  kingdom-tier titles it holds where. Together they are what lets a foreign holding be told from an
+  ordinary frontier — and until they have run in a real sweep, the detector correctly reports itself
+  as not measured rather than guessing.
+- **The watchlist probe** (v0.11). Five saved tags resolved once a game year, at a cost of five log
+  lines and no completion.
+- Earlier, and still outstanding: `almohad_collapse`'s independence factions, `set_relations`, a
+  spawned character's house and claim, and the narrative events `hd_event.0100`–`0102`.
+
 ---
 
 ## 11. Engineering log
 
-Eight engine behaviours stood between a plausible design and a working one. They are documented here
+Eleven engine behaviours stood between a plausible design and a working one. They are documented here
 because they are properties of CK3 rather than of this project, and anyone building a similar bridge
 will meet them. Two further lessons follow, kept separate because they are about system design and
 would be true of this project in any engine.
@@ -412,6 +449,27 @@ dropped without a script-log entry and every figure the Director created took th
 default chance instead. A card proposing a male claimant could produce a woman, and nothing anywhere
 said so. This is behaviour 6 one layer up: the batch reported `applied`, because the batch *had*
 applied — it simply had not applied what the card described.
+
+**10. CK3 cannot be handed a sentence at runtime.** The obvious design for a generic event is to put
+the text in a variable and read it back: `title = var:hd_event_title`. It cannot work, and the three
+facts that close it were checked against the shipped 1.19 files and binary rather than reasoned about.
+Event `title` and `desc` take a *localization key*, or a block that selects among keys — a key can be
+**chosen** at runtime (`title = { first_valid = { triggered_desc … } }` is vanilla, in
+`coronation_events_6.txt` and `debate_events.txt`) and never **supplied**. A variable holds a number, a
+scope or a flag, and a flag is a script identifier with no spaces in it, so prose is not expressible as
+one. And the console strings in `ck3.exe` carry `reload assets`, `reload texture`, `reload jomini` and
+`reload_views`, and no localization reload — so writing a `.yml` at runtime and reloading it through
+the pump has no evidence behind it either. The consequence for a design like this one is structural: a
+model's arbitrary prose can reach the *player*, through the orchestrator's own interface, and cannot
+reach the *game*. What the game can be given at runtime is a choice among pre-written skeletons, the
+game objects to interpolate into them, and numbers.
+
+**11. An unresolvable data function returns the literal text `ERROR:[…]`.** Not an empty string, not a
+script error — the string `ERROR:[scope:hd_belligerent.Char.GetID]` arrived in thirty consecutive war
+records and would have been parsed as a fact if nothing had been looking for it. A dead character's
+`GetPrimaryTitle` does the same thing, which is why the watchlist probe asks `is_alive` in a branch
+rather than reading the title and hoping: the cost of the lazy version is a watched ruler reported as
+holding a title named ERROR.
 
 ### Two lessons that are not about CK3
 
@@ -465,6 +523,18 @@ making the system say what it did, what it is about to do, and — when it refus
 - **The bookmark tables are three dates and a short roster.** They can only permit a demotion the
   baseline could not reach, never widen one it already guards, and absence from them yields nothing.
   But a campaign at 1300 is measured against 1178, and they say nothing at all about the steppe.
+- **A holding is judged from its holder's seat, not from its de jure place.** The detector asks where
+  a realm is ruled from and which major titles it holds where; it does not ask which de jure duchy a
+  county belongs to. It also sees only titles held *personally*, because `every_held_title` does not
+  reach a vassal's titles — so a distant realm holding ground through vassals shows up as counties
+  plus a distant seat rather than as a named duchy. Both are real limits, and both fail towards saying
+  less rather than towards inventing a foreigner.
+- **The watchlist notices four things and no others.** Death, a changed primary title, a changed faith
+  and a changed culture — because those are what a five-line probe can ask about honestly. A ruler
+  losing half their realm without losing their crown is a divergence the clock will find and the watch
+  will not.
+- **Everything in v0.11 is unwatched in CK3.** The check suite and the simulated game exercise it end
+  to end; neither is the engine. Section 10 keeps the two apart.
 - **Realm geography is reported; per-county detail is not.** The sweep says which regions each realm
   holds land in, which is what a regional action needs. It still does not report individual counties,
   so county-level work waits on the richer perception in section 13.
@@ -516,14 +586,23 @@ making the system say what it did, what it is about to do, and — when it refus
 
 **Medium term**
 - Local Wikipedia dumps with a vector store, replacing the live API path
-- Event-driven auditing — react to wars, deaths and successions rather than a fixed interval
-- Richer perception: de jure structure and borders as first-class data (title tier now is)
+- Richer perception: de jure structure and borders as first-class data (title tier and a realm's seat
+  now are)
+- Per-proposal retrieval, which generalised wars need rather than merely want: a curated war carries
+  its own sources, a generated one would cite whatever the audit happened to fetch
 
 **Longer term**
 - Phase II coverage with curated structured data for the steppe and East Asia
 - Generalisation to other Paradox titles; the architecture is not CK3-specific
 - Bookmark tables beyond three dates, so a campaign at 1300 is measured against something nearer than
   1178
+
+**Done in v0.11**
+- ~~Event-driven auditing — react to wars, deaths and successions rather than a fixed interval~~ —
+  each audit nominates three to five rulers worth watching, and a yearly five-line probe asks whether
+  any of them has died, lost their primary title, or changed faith or culture. One that has interrupts
+  the cadence and opens the next audit with what happened. The clock still asks "has the world
+  drifted"; this asks "has something happened", and the two want different cadences.
 
 **Done in v0.3**
 - ~~Packaging for people who are not comfortable with a console command~~ — `npm run build:exe`
@@ -546,6 +625,7 @@ mod/                        the CK3 companion mod
   common/opinion_modifiers/   the opinion set_relations applies
   gui/custom_gui/             the execution pump
   events/                     bootstrap, notification, narrative events, hd_event.0200
+                              and hd_dynamic.0001, the one generic event
   localization/english/       every key the mod's script references
 
 src/
@@ -553,15 +633,21 @@ src/
   model/WorldState.js         a stream of records becomes a snapshot
   model/Baseline.js           the map as the campaign began
   model/AuditClock.js         the cadence, persisted across restarts
+  model/Watchlist.js          who is worth interrupting the cadence for
   director/regions.js         the region catalogue and its adjacency graph
   director/sphere.js          what the Director is allowed to see
   director/toolkit.js         the actions, their validation and their script
   director/macroEvents.js     the Macro Event Library: intensity band, staged scopes
   director/momentum.js        the pre-authored amplifications of grant_claim
+  director/dynamicEvents.js   the occasions hd_dynamic.0001 can be, and their script
+  director/borderGore.js      who holds ground here from a court somewhere else
+  director/stances.js         what the map says a neighbour feels about the player
+  director/dispatches.js      the letters that feeling produces, and their replies
   director/bookmarkTiers.js   what the record says, at 867 / 1066 / 1178
   director/Director.js        the audit loop, the prompt, the destructive cap
   knowledge/                  Wikipedia + Wikidata retrieval
-  lore/LoreBook.js            the ledger
+  lore/LoreBook.js            the ledger of the player's verdicts
+  lore/DispatchLedger.js      what the world remembers about being ignored
   llm/client.js               OpenAI-compatible client, no SDK
   setup/                      mod deployment and preflight
   runtime.js                  source checkout, executable, or test harness
@@ -577,6 +663,11 @@ scripts/
   check-tier-fixes.mjs        the toolkit, baseline-gate, macro-event and locality cases
   check-regions.mjs           the region catalogue's invariants
   check-localization.mjs      every key the mod references is defined
+  check-resilience.mjs        the log budget, the pump interval, liveness
+  check-dynamic-events.mjs    the generic event, its gate, and the injection claim
+  check-window.mjs            the window filter, and the queries that feed it
+  check-border-gore.mjs       the seat probe, and what it refuses to conclude
+  check-watchlist.mjs         divergence, and the three ways it must not be inferred
   verify-toolkit.mjs          stage one action into a live game, bypassing approval
 ```
 
