@@ -238,7 +238,8 @@ the CK3 folder, `debug.log`, the run folder, the deployed mod and the API key is
 | `Effect is empty. Check error log` | Not an error: the batch guard refusing to run a batch it has already executed. |
 | `retrieved 0 articles` | Wikipedia or Wikidata throttled the request. It recovers on its own. |
 | "The player could not be located in any known region" | Your capital is outside supported coverage (the steppe, Tibet, East Asia). The Director refuses rather than invents. |
-| It proposes nothing on a loaded save | Often correct: the world may be on track. On a mid-campaign save it measures rank changes against a curated table of the record, and a realm the table does not name yields nothing. |
+| `the model ran out of room` | The model's reply was cut off at the **Max tokens** limit, so the whole audit was discarded. Raise it in the Settings tab — 4096 is comfortable. A full audit reply (two proposals, six neighbours' letters and the watchlist) is around 2,300 tokens, and it is precisely the audits that *have* something to propose that overflow. The older default was 2000. |
+| It proposes nothing on a loaded save | First look at the line under the empty proposal list: if it says **FAILED**, the audit never finished and the row above is the likely reason. Otherwise it is often correct — the world may be on track. On a mid-campaign save it measures rank changes against a curated table of the record, and a realm the table does not name yields nothing. |
 | `the game REFUSED …` | The action's precondition was false, so nothing changed. Decline it and move on. |
 | `EADDRINUSE` on port 7842 | An orchestrator is already running. Use it, or close the other one. |
 | The sidebar shows old numbers | Refresh the page. |

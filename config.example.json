@@ -7,7 +7,7 @@
     "apiKeyEnv": "HD_API_KEY",
     "apiKey": "",
     "temperature": 0.2,
-    "maxTokens": 2000
+    "maxTokens": 4096
   },
   "director": {
     "auditEveryYears": 5,

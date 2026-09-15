@@ -13,6 +13,11 @@ const bad = process.argv.includes('--bad');
 const andalusMode = process.argv.includes('--andalus');
 const momentumMode = process.argv.includes('--momentum');
 const dynamicMode = process.argv.includes('--dynamic');
+// A model that runs out of room. It writes a reply larger than whatever
+// max_tokens the request carried and returns only what fits, with
+// finish_reason "length" - which is what a real provider does, and what a live
+// 1245 campaign at the old 2000 default is believed to have been hitting.
+const truncateMode = process.argv.includes('--truncate');
 
 const good = {
   assessment:
@@ -134,6 +139,16 @@ http
     req.on('data', (c) => (body += c));
     req.on('end', () => {
       console.log(`[stub] ${req.method} ${req.url} (${body.length} bytes of prompt)`);
+      if (truncateMode) {
+        const cap = Number(JSON.parse(body || '{}').max_tokens) || 2000;
+        const limit = Math.floor(cap * 3.7);
+        // Padded past the cap on purpose: the point is a reply that did not fit.
+        const full = JSON.stringify({ ...good, assessment: `${good.assessment} `.repeat(Math.ceil((limit * 1.2) / good.assessment.length)) });
+        console.log(`[stub] reply is ${full.length} chars against a ${cap}-token cap (${limit} chars): cut off, finish_reason=length`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: full.slice(0, limit) }, finish_reason: 'length' }] }));
+        return;
+      }
       const payload = JSON.stringify(
         bad ? badResponse
           : dynamicMode ? dynamic

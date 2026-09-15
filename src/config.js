@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { appHome } from './runtime.js';
+import { DEFAULT_MAX_TOKENS } from './llm/client.js';
 
 // Where config.json and the two ledgers live. In the repo that is the project
 // folder; in the built executable it is the folder the .exe sits in; under a
@@ -70,7 +71,9 @@ export function loadConfig() {
       // you to set, without hardcoding it in two more places.
       apiKeyEnv: llm.apiKeyEnv ?? 'HD_API_KEY',
       temperature: llm.temperature ?? 0.2,
-      maxTokens: llm.maxTokens ?? 2000,
+      // One number, owned by the client that uses it. See DEFAULT_MAX_TOKENS
+      // for why 2000 stopped being enough.
+      maxTokens: llm.maxTokens ?? DEFAULT_MAX_TOKENS,
     },
     director: {
       // How many in-game years pass between audits. The single most

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { DEFAULT_MAX_TOKENS } from './llm/client.js';
 
 /**
  * Reading and changing which model the Director talks to, at runtime.
@@ -22,7 +23,7 @@ const FIELDS = {
   baseUrl: (v) => String(v ?? '').trim().replace(/\/+$/, ''),
   model: (v) => String(v ?? '').trim(),
   temperature: (v) => clamp(Number(v), 0, 2, 0.2),
-  maxTokens: (v) => Math.trunc(clamp(Number(v), 1, 32000, 2000)),
+  maxTokens: (v) => Math.trunc(clamp(Number(v), 1, 32000, DEFAULT_MAX_TOKENS)),
 };
 
 function clamp(n, lo, hi, fallback) {

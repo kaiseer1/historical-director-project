@@ -10,12 +10,13 @@
     "doctor": "node scripts/doctor.mjs",
     "build:exe": "node scripts/build-exe.mjs",
     "bundle": "node scripts/bundle.mjs",
-    "check": "node scripts/check-tier-fixes.mjs && node scripts/check-regions.mjs && node scripts/check-localization.mjs && node scripts/check-resilience.mjs && node scripts/check-dynamic-events.mjs && node scripts/check-window.mjs && node scripts/check-border-gore.mjs && node scripts/check-watchlist.mjs",
+    "check": "node scripts/check-tier-fixes.mjs && node scripts/check-regions.mjs && node scripts/check-localization.mjs && node scripts/check-resilience.mjs && node scripts/check-dynamic-events.mjs && node scripts/check-window.mjs && node scripts/check-border-gore.mjs && node scripts/check-watchlist.mjs && node scripts/check-llm-client.mjs",
     "smoke": "node scripts/smoke.mjs --andalus",
     "smoke:exe": "node scripts/smoke.mjs --andalus --exe",
     "smoke:momentum": "node scripts/smoke.mjs --andalus --momentum",
     "smoke:restart": "node scripts/smoke.mjs --andalus --restart",
-    "smoke:dynamic": "node scripts/smoke.mjs --anatolia --dynamic"
+    "smoke:dynamic": "node scripts/smoke.mjs --anatolia --dynamic",
+    "smoke:truncated": "node scripts/smoke.mjs --andalus --truncated"
   },
   "engines": {
     "node": ">=20"

@@ -103,7 +103,11 @@ const restartMode = args.includes('--restart');
 // is the only way to make the divergence trigger fire inside a smoke run: a
 // real campaign obliges eventually and a thirty-second test cannot wait.
 const dynamicMode = args.includes('--dynamic');
-const stubArgs = dynamicMode ? ['--dynamic'] : momentumMode ? ['--momentum'] : scenario === '--andalus' ? ['--andalus'] : [];
+// The model runs out of room mid-reply. What is being proven is not that the
+// audit fails - it has to - but that the failure is named and visible, rather
+// than an empty sidebar that reads like a Director with nothing to say.
+const truncatedMode = args.includes('--truncated');
+const stubArgs = truncatedMode ? ['--truncate'] : dynamicMode ? ['--dynamic'] : momentumMode ? ['--momentum'] : scenario === '--andalus' ? ['--andalus'] : [];
 const stub = start('stub', ['scripts/stub-llm.mjs', ...stubArgs]);
 const sim = start('sim', ['scripts/simulate-game.mjs', scenario, '--log', LOG, ...(dynamicMode ? ['--kill-watched'] : [])]);
 
@@ -148,6 +152,25 @@ console.log(`running ${scenario.slice(2)}${momentumMode ? ' +momentum' : ''} for
 // nothing at all about whether a verdict reaches the game. With --momentum the
 // proposal carries pre-authored effects, so this is also the only end-to-end
 // check that those survive validation, approval and script composition.
+if (truncatedMode) {
+  // Read the panel the player would have looked at. The activity log is where
+  // the failure was always written; the panel is where it was never shown.
+  setTimeout(async () => {
+    try {
+      const s = await fetch(`http://127.0.0.1:${PORT}/api/state`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      }).then((r) => r.json());
+      const panel = s.state.lastAudit
+        ? `${s.state.lastAudit.failed ? '(failed) ' : ''}${s.state.lastAudit.outcome}`
+        : '(empty)';
+      appOutput += `[smoke] last audit panel: ${panel}\n`;
+      appOutput += `[smoke] proposals on screen: ${s.proposals.length}\n`;
+    } catch (err) {
+      appOutput += `[smoke] could not read state: ${err?.message ?? err}\n`;
+    }
+  }, 16_000);
+}
+
 if (momentumMode || dynamicMode) {
   setTimeout(async () => {
     try {
@@ -226,6 +249,18 @@ setTimeout(() => {
     checks.push(['the game confirms it took effect', /the game confirmed grant_claim took effect/]);
   }
 
+  if (truncatedMode) {
+    // The whole reason for the leg: the audit that fails must say why, and say
+    // it where the player is looking.
+    checks.splice(checks.findIndex(([n]) => n === 'the audit concludes'), 1);
+    checks.splice(checks.findIndex(([n]) => n === 'and it reaches the player as dispatches'), 1);
+    checks.push(['the log names the cause, not a character offset', /audit failed: the model ran out of room/]);
+    checks.push(['and names the setting that fixes it', /Raise Max tokens in the Settings tab/]);
+    checks.push(['no raw JSON parser error reaches the player', (out) => !/Expected ','|in JSON at position/.test(out)]);
+    checks.push(['the audit panel shows the failure instead of nothing', /last audit panel: \(failed\) FAILED - the model ran out of room/]);
+    checks.push(['and nothing half-parsed reached the screen', /proposals on screen: 0/]);
+  }
+
   if (dynamicMode) {
     // Feature by feature, in the order the loop reaches them.
     checks.push(['a dynamic event survives validation', /the Director has [1-9]\d* proposal/]);
@@ -242,7 +277,9 @@ setTimeout(() => {
     checks.push(['and audits early because of it', /woken early by the watchlist|auditing early -/]);
   }
 
-  if (scenario === '--andalus' && !momentumMode) {
+  // Not in the truncated leg either: its audit is meant to fail, so the gate it
+  // proves is never reached.
+  if (scenario === '--andalus' && !momentumMode && !truncatedMode) {
     // The point of this scenario. Before bookmarkTiers.js the proposal was
     // dropped with "has stood at empire tier since the campaign began".
     checks.push(['the mid-campaign gate lets a proposal through', /the Director has [1-9]\d* proposal/]);

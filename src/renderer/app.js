@@ -136,10 +136,29 @@ function renderLastAudit() {
   if (!host) return;
   const a = current.state?.lastAudit;
   host.textContent = '';
+
+  // The empty state was written for a Director with nothing to say, and it
+  // says so warmly: "You do not need to watch it." Above a failed audit that
+  // sentence is wrong, and it is the sentence that made a year-on-year run of
+  // failures look like calm. Caught by looking at the panel rather than by any
+  // check - the failure box rendered correctly underneath its own denial.
+  const headline = $('empty-headline');
+  const reassurance = $('empty-reassurance');
+  const failed = Boolean(a?.failed);
+  if (headline) {
+    headline.textContent = failed
+      ? 'The last audit failed, so nothing could be proposed.'
+      : 'Nothing awaiting your judgement.';
+  }
+  if (reassurance) reassurance.hidden = failed;
+
   if (!a) return;
 
   const when = new Date(a.at).toLocaleTimeString();
-  host.appendChild(el('div', null, `Last audit ${when}, in-game ${a.date}: ${a.outcome}.`));
+  // A failure takes the warning style rather than the plain line. It is the one
+  // outcome that means the empty proposal list below is not the Director's
+  // judgement, and it should not read like one.
+  host.appendChild(el('div', a.failed ? 'warn' : null, `Last audit ${when}, in-game ${a.date}: ${a.outcome}`));
 
   // A dropped proposal is the most useful thing the sidebar can show when the
   // screen is otherwise empty - it is the difference between "the Director saw
@@ -556,7 +575,8 @@ async function loadSettings() {
   $('baseUrl').value = s.baseUrl ?? '';
   $('model').value = s.model ?? '';
   $('temperature').value = s.temperature ?? 0.2;
-  $('maxTokens').value = s.maxTokens ?? 2000;
+  // Mirrors DEFAULT_MAX_TOKENS in llm/client.js, which the page cannot import.
+  $('maxTokens').value = s.maxTokens ?? 4096;
   $('apiKey').value = '';
 
   const note = $('key-note');

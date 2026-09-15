@@ -573,6 +573,30 @@ tailer.on('record', async (rec) => {
   }
 });
 
+/**
+ * Put a failed audit where a successful one would have gone.
+ *
+ * `lastAudit` used to be set only on success, so a failure left the panel
+ * showing nothing at all - and an empty panel above an empty proposal list
+ * reads exactly like a Director with nothing to say. A live 1245 campaign
+ * audited every in-game year looking like that, and a failure reported only in
+ * the Log tab is one nobody reads while the screen looks calm. Whether those
+ * particular audits failed is inferred rather than observed (see
+ * DEFAULT_MAX_TOKENS in llm/client.js); that a failure was indistinguishable
+ * from silence is not. It has to occupy the same space a success does.
+ *
+ * @param {string} outcome
+ */
+function noteAuditFailed(outcome) {
+  state.lastAudit = {
+    date: state.snapshot?.date ?? '',
+    outcome,
+    rejected: [],
+    failed: true,
+    at: Date.now(),
+  };
+}
+
 async function runAudit() {
   if (state.busy || !state.snapshot) return;
   state.busy = true;
@@ -591,6 +615,7 @@ async function runAudit() {
     // settings panel should let the very next audit run, without a restart.
     if (!llm.apiKey) {
       log(`no API key set, so no audit. Set ${cfg.llm.apiKeyEnv ?? 'HD_API_KEY'} in your environment, or paste one into the sidebar's Settings tab.`);
+      noteAuditFailed('not run: no API key is set');
       return;
     }
     const result = await director.audit(state.snapshot, state.sphere.regions, {
@@ -649,6 +674,7 @@ async function runAudit() {
     broadcast('dispatches', { dispatches: state.dispatches });
   } catch (err) {
     log(`audit failed: ${err?.message ?? err}`);
+    noteAuditFailed(`FAILED - ${err?.message ?? err}`);
   } finally {
     // Cleared whether the audit succeeded or not. A divergence that survived a
     // failed audit would re-trigger on the next heartbeat and go on doing so,
